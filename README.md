@@ -71,7 +71,7 @@ milestone, the non-bang functions return `{:error, :not_implemented}`.
 
 Alembic is developed as an independent library.
 
-During local development, Grimoire can reference Alembic as a path dependency:
+During local development, [Grimoire](https://github.com/uminocelo/grimoire_ex) can reference Alembic as a path dependency:
 
 ```elixir
 defp deps do
