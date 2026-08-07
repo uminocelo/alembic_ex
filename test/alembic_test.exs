@@ -24,11 +24,11 @@ defmodule AlembicTest do
     end
   end
 
-  describe "compile/2" do
+  describe "compile!/2" do
     test "raises when compilation fails" do
       source = TestFixtures.plain_template()
 
-      assert_raise RuntimeError, "Alembic compile failed :not_implemented", fn ->
+      assert_raise RuntimeError, "Alembic compile failed: :not_implemented", fn ->
         Alembic.compile!(source, [])
       end
     end
@@ -38,7 +38,7 @@ defmodule AlembicTest do
     test "raises when rendering fails" do
       assigns = TestFixtures.empty_assigns()
 
-      assert_raise RuntimeError, "Alembic render failed :not_implemented", fn ->
+      assert_raise RuntimeError, "Alembic render failed: :not_implemented", fn ->
         Alembic.render!(:compiled_template, assigns, [])
       end
     end
