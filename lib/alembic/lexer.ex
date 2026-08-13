@@ -54,12 +54,12 @@ defmodule Alembic.Lexer do
 
         do_tokenize(remaining, %{
           state
-          | tokens: [{:output, content} | tokens],
+          | tokens: [{:tag, content} | tokens],
             position: position + consumed
         })
 
       :error ->
-        {:error, {:unterminated_output, position}}
+        {:error, {:unterminated_tag, position}}
     end
   end
 
