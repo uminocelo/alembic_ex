@@ -20,7 +20,9 @@ defmodule Alembic.InheritanceTest do
   describe "collect_blocks/1" do
     test "collects top-level blocks" do
       ast = compile("{% block a %}A{% endblock %}{% block b %}B{% endblock %}")
-      assert {:ok, %{"a" => [{:text, "A"}], "b" => [{:text, "B"}]}} = Inheritance.collect_blocks(ast)
+
+      assert {:ok, %{"a" => [{:text, "A"}], "b" => [{:text, "B"}]}} =
+               Inheritance.collect_blocks(ast)
     end
 
     test "collects blocks nested inside if/for" do
@@ -29,7 +31,8 @@ defmodule Alembic.InheritanceTest do
           "{% if x %}{% block a %}A{% endblock %}{% endif %}{% for i in xs %}{% block b %}B{% endblock %}{% endfor %}"
         )
 
-      assert {:ok, %{"a" => [{:text, "A"}], "b" => [{:text, "B"}]}} = Inheritance.collect_blocks(ast)
+      assert {:ok, %{"a" => [{:text, "A"}], "b" => [{:text, "B"}]}} =
+               Inheritance.collect_blocks(ast)
     end
 
     test "errors on duplicate block names" do
@@ -45,6 +48,7 @@ defmodule Alembic.InheritanceTest do
   describe "resolve/2" do
     test "splices a matching override in place of the block" do
       parent = compile("<a>{% block x %}default{% endblock %}</b>")
+
       assert [{:text, "<a>"}, {:text, "override"}, {:text, "</b>"}] =
                Inheritance.resolve(parent, %{"x" => [{:text, "override"}]})
     end
@@ -56,7 +60,10 @@ defmodule Alembic.InheritanceTest do
 
     test "resolves blocks nested inside if/for" do
       parent = compile("{% if x %}{% block a %}default{% endblock %}{% endif %}")
-      [{:if, _cond, then_branch, [], nil}] = Inheritance.resolve(parent, %{"a" => [{:text, "custom"}]})
+
+      [{:if, _cond, then_branch, [], nil}] =
+        Inheritance.resolve(parent, %{"a" => [{:text, "custom"}]})
+
       assert then_branch == [{:text, "custom"}]
     end
   end
@@ -64,7 +71,9 @@ defmodule Alembic.InheritanceTest do
   describe "preprocess/2" do
     test "returns the AST unchanged when there is no extends node" do
       ast = compile("hello {{ name }}")
-      assert {:ok, ^ast} = Inheritance.preprocess(ast, fn _ -> {:error, :should_not_be_called} end)
+
+      assert {:ok, ^ast} =
+               Inheritance.preprocess(ast, fn _ -> {:error, :should_not_be_called} end)
     end
   end
 
@@ -91,14 +100,18 @@ defmodule Alembic.InheritanceTest do
     end
 
     test "block.super renders parent content inside the child override", %{loader: loader} do
-      child = ~s({% extends "base.html" %}{% block title %}Prefix - {{ block.super }}{% endblock %})
+      child =
+        ~s({% extends "base.html" %}{% block title %}Prefix - {{ block.super }}{% endblock %})
+
       assert {:ok, "<html>Prefix - Default Title</html>"} = render(child, loader)
     end
   end
 
   describe "multi-level inheritance chain" do
     test "three levels: each ancestor's blocks are visible unless overridden closer to the child" do
-      grandparent = ~s(<h>{% block title %}GPTitle{% endblock %}</h><b>{% block content %}GPContent{% endblock %}</b>)
+      grandparent =
+        ~s(<h>{% block title %}GPTitle{% endblock %}</h><b>{% block content %}GPContent{% endblock %}</b>)
+
       parent = ~s({% extends "grandparent.html" %}{% block content %}ParentContent{% endblock %})
       child = ~s({% extends "parent.html" %}{% block title %}ChildTitle{% endblock %})
 
@@ -132,13 +145,17 @@ defmodule Alembic.InheritanceTest do
       end
 
       ast_a = compile(~s({% extends "b.html" %}))
-      assert {:error, {:circular_inheritance, "b.html"}} = Inheritance.resolve_chain(ast_a, loader)
+
+      assert {:error, {:circular_inheritance, "b.html"}} =
+               Inheritance.resolve_chain(ast_a, loader)
     end
 
     test "a template that extends itself is caught" do
       loader = fn "self.html" -> {:ok, ~s({% extends "self.html" %})} end
       ast = compile(~s({% extends "self.html" %}))
-      assert {:error, {:circular_inheritance, "self.html"}} = Inheritance.resolve_chain(ast, loader)
+
+      assert {:error, {:circular_inheritance, "self.html"}} =
+               Inheritance.resolve_chain(ast, loader)
     end
   end
 

@@ -39,7 +39,9 @@ defmodule Alembic.Integration.InheritanceE2ETest do
 
   describe "error propagation" do
     test "missing parent template surfaces as a structured error" do
-      loader_error_fixture = "test/fixtures/tmp/missing_parent_#{System.unique_integer([:positive])}.html"
+      loader_error_fixture =
+        "test/fixtures/tmp/missing_parent_#{System.unique_integer([:positive])}.html"
+
       File.mkdir_p!(Path.dirname(loader_error_fixture))
       File.write!(loader_error_fixture, ~s({% extends "does_not_exist.html" %}))
 

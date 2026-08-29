@@ -33,7 +33,8 @@ defmodule Alembic.LoaderTest do
     end
 
     test "a name with an explicit extension is used as-is, without appending more" do
-      assert {:ok, _content} = Loader.load("base.html", roots: [@templates_root], extensions: [".liquid"])
+      assert {:ok, _content} =
+               Loader.load("base.html", roots: [@templates_root], extensions: [".liquid"])
     end
 
     test "path traversal attempt returns a structured error and never reads the file" do
@@ -45,7 +46,9 @@ defmodule Alembic.LoaderTest do
       # Path.join/2 never lets its second argument become absolute, so this
       # resolves to `<root>/etc/passwd.*` — still inside the root, just not
       # found — rather than a traversal outside it.
-      assert {:error, {:template_not_found, paths}} = Loader.load("/etc/passwd", roots: [@templates_root])
+      assert {:error, {:template_not_found, paths}} =
+               Loader.load("/etc/passwd", roots: [@templates_root])
+
       assert Enum.all?(paths, &String.starts_with?(&1, Path.expand(@templates_root)))
     end
 
@@ -103,7 +106,8 @@ defmodule Alembic.LoaderTest do
     end
 
     test "returns a template_not_found error for a missing template" do
-      assert {:error, {:template_not_found, _paths}} = Loader.stat("missing.html", roots: [@templates_root])
+      assert {:error, {:template_not_found, _paths}} =
+               Loader.stat("missing.html", roots: [@templates_root])
     end
   end
 end

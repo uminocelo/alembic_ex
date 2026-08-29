@@ -148,11 +148,28 @@ defmodule Alembic do
   end
 
   @doc """
+  Compiles and renders a template string in one step, raising on error.
+
+  ## Examples
+
+      iex> Alembic.render_string!("Hi {{ user }}", %{"user" => "Alice"})
+      "Hi Alice"
+  """
+  @spec render_string!(String.t(), map(), keyword()) :: String.t()
+  def render_string!(source, assigns \\ %{}, opts \\ []) do
+    case render_string(source, assigns, opts) do
+      {:ok, html} -> html
+      {:error, reason} -> raise Alembic.TemplateError, reason: reason
+    end
+  end
+
+  @doc """
   Loads, compiles (using the cache when enabled), and renders a template
   file resolved by name across the configured template roots.
   """
   @spec render_file(String.t(), map(), keyword()) ::
-          {:ok, String.t()} | {:error, {:loader, Loader.reason()} | compile_error() | render_error()}
+          {:ok, String.t()}
+          | {:error, {:loader, Loader.reason()} | compile_error() | render_error()}
   def render_file(name, assigns \\ %{}, opts \\ []) do
     with {:ok, resolved_path} <- resolve_step(name, opts),
          {:ok, ast} <- compiled_ast_for(resolved_path, opts) do

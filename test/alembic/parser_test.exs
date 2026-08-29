@@ -64,7 +64,8 @@ defmodule Alembic.ParserTest do
     end
 
     test "if without else" do
-      assert {:ok, [{:if, _condition, [{:text, "yes"}], [], nil}]} = parse("{% if x %}yes{% endif %}")
+      assert {:ok, [{:if, _condition, [{:text, "yes"}], [], nil}]} =
+               parse("{% if x %}yes{% endif %}")
     end
 
     test "if with elsif chain and else" do
@@ -133,7 +134,8 @@ defmodule Alembic.ParserTest do
     end
 
     test "block with nested content" do
-      assert {:ok, [{:block, "title", [{:text, "Hi"}]}]} = parse("{% block title %}Hi{% endblock %}")
+      assert {:ok, [{:block, "title", [{:text, "Hi"}]}]} =
+               parse("{% block title %}Hi{% endblock %}")
     end
 
     test "extends followed by block overrides" do

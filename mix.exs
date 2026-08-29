@@ -71,7 +71,7 @@ defmodule Alembic.MixProject do
         "COMPATIBILITY.md": [title: "Liquid Compatibility"],
         "BENCHMARKS.md": [title: "Benchmarks"],
         "CHANGELOG.md": [title: "Changelog"],
-        "LICENSE": [title: "License"]
+        LICENSE: [title: "License"]
       ],
       groups_for_modules: [
         Pipeline: [

@@ -195,15 +195,18 @@ defmodule Alembic.LexerTest do
     end
 
     test "returns an error for unterminated block tags" do
-      assert {:error, {:unterminated_tag, %{line: 1, col: 1}}} = Lexer.tokenize("{% if user.admin")
+      assert {:error, {:unterminated_tag, %{line: 1, col: 1}}} =
+               Lexer.tokenize("{% if user.admin")
     end
 
     test "returns the position of an unterminated output expression" do
-      assert {:error, {:unterminated_output, %{line: 1, col: 7}}} = Lexer.tokenize("Hello {{ name")
+      assert {:error, {:unterminated_output, %{line: 1, col: 7}}} =
+               Lexer.tokenize("Hello {{ name")
     end
 
     test "returns character position instead of byte offserts" do
-      assert {:error, {:unterminated_output, %{line: 1, col: 7}}} = Lexer.tokenize("Olá 🙂 {{ name")
+      assert {:error, {:unterminated_output, %{line: 1, col: 7}}} =
+               Lexer.tokenize("Olá 🙂 {{ name")
     end
 
     test "rejects an empty output expressions" do

@@ -40,7 +40,8 @@ defmodule Alembic.Config do
       [".html", ".liquid"]
   """
   @spec template_extensions() :: [String.t()]
-  def template_extensions, do: Application.get_env(:alembic, :template_extensions, @default_extensions)
+  def template_extensions,
+    do: Application.get_env(:alembic, :template_extensions, @default_extensions)
 
   @doc """
   `config :alembic, :cache` — whether `Alembic.Cache` is active. Defaults

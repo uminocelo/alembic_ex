@@ -54,7 +54,7 @@ defmodule Alembic.Parser.Expression do
 
       trimmed ->
         with {:ok, tokens} <- tokenize(trimmed),
-             {:ok, expr, []} <- parse_or(tokens) do
+             {:ok, expr, []} <- parse_or(tokens, true) do
           {:ok, expr}
         else
           {:ok, _expr, [token | _rest]} -> {:error, {:unexpected_token, token}}
@@ -64,58 +64,66 @@ defmodule Alembic.Parser.Expression do
   end
 
   # ---- Recursive descent (precedence, low to high): or, and, not, comparison ----
+  #
+  # `allow_filters` is `false` while parsing a filter's own arguments — see
+  # parse_filter_args/1 below for why: without it, `x | f: arg | g` is
+  # ambiguous, and this precedence chain would silently parse it as
+  # `x | f: (arg | g)` instead of the intended `(x | f: arg) | g`.
 
-  defp parse_or(tokens) do
-    with {:ok, left, rest} <- parse_and(tokens) do
-      parse_or_rest(left, rest)
+  defp parse_or(tokens, allow_filters) do
+    with {:ok, left, rest} <- parse_and(tokens, allow_filters) do
+      parse_or_rest(left, rest, allow_filters)
     end
   end
 
-  defp parse_or_rest(left, [:or | rest]) do
-    with {:ok, right, rest2} <- parse_and(rest) do
-      parse_or_rest({:logical, :or, left, right}, rest2)
+  defp parse_or_rest(left, [:or | rest], allow_filters) do
+    with {:ok, right, rest2} <- parse_and(rest, allow_filters) do
+      parse_or_rest({:logical, :or, left, right}, rest2, allow_filters)
     end
   end
 
-  defp parse_or_rest(left, rest), do: {:ok, left, rest}
+  defp parse_or_rest(left, rest, _allow_filters), do: {:ok, left, rest}
 
-  defp parse_and(tokens) do
-    with {:ok, left, rest} <- parse_not(tokens) do
-      parse_and_rest(left, rest)
+  defp parse_and(tokens, allow_filters) do
+    with {:ok, left, rest} <- parse_not(tokens, allow_filters) do
+      parse_and_rest(left, rest, allow_filters)
     end
   end
 
-  defp parse_and_rest(left, [:and | rest]) do
-    with {:ok, right, rest2} <- parse_not(rest) do
-      parse_and_rest({:logical, :and, left, right}, rest2)
+  defp parse_and_rest(left, [:and | rest], allow_filters) do
+    with {:ok, right, rest2} <- parse_not(rest, allow_filters) do
+      parse_and_rest({:logical, :and, left, right}, rest2, allow_filters)
     end
   end
 
-  defp parse_and_rest(left, rest), do: {:ok, left, rest}
+  defp parse_and_rest(left, rest, _allow_filters), do: {:ok, left, rest}
 
-  defp parse_not([:not | rest]) do
-    with {:ok, expr, rest2} <- parse_comparison(rest) do
+  defp parse_not([:not | rest], allow_filters) do
+    with {:ok, expr, rest2} <- parse_comparison(rest, allow_filters) do
       {:ok, {:not, expr}, rest2}
     end
   end
 
-  defp parse_not(tokens), do: parse_comparison(tokens)
+  defp parse_not(tokens, allow_filters), do: parse_comparison(tokens, allow_filters)
 
   @compare_ops [:eq, :neq, :gt, :lt, :gte, :lte, :contains]
 
-  defp parse_comparison(tokens) do
-    with {:ok, left, rest} <- parse_filtered_primary(tokens) do
-      parse_comparison_rhs(left, rest)
+  defp parse_comparison(tokens, allow_filters) do
+    with {:ok, left, rest} <- parse_operand(tokens, allow_filters) do
+      parse_comparison_rhs(left, rest, allow_filters)
     end
   end
 
-  defp parse_comparison_rhs(left, [{:op, op} | rest]) when op in @compare_ops do
-    with {:ok, right, rest2} <- parse_filtered_primary(rest) do
+  defp parse_comparison_rhs(left, [{:op, op} | rest], allow_filters) when op in @compare_ops do
+    with {:ok, right, rest2} <- parse_operand(rest, allow_filters) do
       {:ok, {:compare, op, left, right}, rest2}
     end
   end
 
-  defp parse_comparison_rhs(left, rest), do: {:ok, left, rest}
+  defp parse_comparison_rhs(left, rest, _allow_filters), do: {:ok, left, rest}
+
+  defp parse_operand(tokens, true), do: parse_filtered_primary(tokens)
+  defp parse_operand(tokens, false), do: parse_primary(tokens)
 
   defp parse_filtered_primary(tokens) do
     with {:ok, primary, rest} <- parse_primary(tokens) do
@@ -136,10 +144,12 @@ defmodule Alembic.Parser.Expression do
   end
 
   defp collect_filters(tokens, [], base), do: {:ok, base, tokens}
-  defp collect_filters(tokens, acc, base), do: {:ok, {:filter_chain, base, Enum.reverse(acc)}, tokens}
+
+  defp collect_filters(tokens, acc, base),
+    do: {:ok, {:filter_chain, base, Enum.reverse(acc)}, tokens}
 
   defp parse_filter_args([:colon | rest]) do
-    with {:ok, first_arg, rest2} <- parse_or(rest) do
+    with {:ok, first_arg, rest2} <- parse_or(rest, false) do
       collect_more_filter_args(rest2, [first_arg])
     end
   end
@@ -147,7 +157,7 @@ defmodule Alembic.Parser.Expression do
   defp parse_filter_args(tokens), do: {:ok, [], tokens}
 
   defp collect_more_filter_args([:comma | rest], acc) do
-    with {:ok, arg, rest2} <- parse_or(rest) do
+    with {:ok, arg, rest2} <- parse_or(rest, false) do
       collect_more_filter_args(rest2, [arg | acc])
     end
   end
@@ -235,7 +245,7 @@ defmodule Alembic.Parser.Expression do
   end
 
   defp tokenize(<<c::utf8, _::binary>> = input, acc)
-       when (c in ?a..?z or c in ?A..?Z or c == ?_) do
+       when c in ?a..?z or c in ?A..?Z or c == ?_ do
     scan_ident(input, acc)
   end
 
@@ -304,7 +314,7 @@ defmodule Alembic.Parser.Expression do
   end
 
   defp take_ident_chars(<<c::utf8, rest::binary>>, acc)
-       when (c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?_) do
+       when c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?_ do
     take_ident_chars(rest, [<<c::utf8>> | acc])
   end
 

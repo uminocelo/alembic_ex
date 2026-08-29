@@ -43,7 +43,8 @@ defmodule Alembic.Integration.LiquidCompatTest do
     end
 
     test "contains" do
-      assert {:ok, "yes"} = render(~s({% if s contains "ell" %}yes{% else %}no{% endif %}), %{"s" => "hello"})
+      assert {:ok, "yes"} =
+               render(~s({% if s contains "ell" %}yes{% else %}no{% endif %}), %{"s" => "hello"})
     end
 
     test "elsif chains" do
@@ -54,7 +55,8 @@ defmodule Alembic.Integration.LiquidCompatTest do
 
   describe "for tag" do
     test "arrays" do
-      assert {:ok, "abc"} = render("{% for x in xs %}{{ x }}{% endfor %}", %{"xs" => ["a", "b", "c"]})
+      assert {:ok, "abc"} =
+               render("{% for x in xs %}{{ x }}{% endfor %}", %{"xs" => ["a", "b", "c"]})
     end
 
     test "forloop object" do
@@ -102,7 +104,8 @@ defmodule Alembic.Integration.LiquidCompatTest do
 
   describe "comments" do
     test "content is discarded entirely" do
-      assert {:ok, "beforeafter"} = render("before{% comment %}{{ anything }}{% endcomment %}after")
+      assert {:ok, "beforeafter"} =
+               render("before{% comment %}{{ anything }}{% endcomment %}after")
     end
   end
 

@@ -147,8 +147,11 @@ defmodule Alembic.Evaluator do
       iter_ctx = Context.push_scope(loop_ctx, scope)
 
       case eval_nodes(body, iter_ctx) do
-        {:ok, chunk, new_iter_ctx} -> {:cont, {:ok, [acc, chunk], Context.pop_scope(new_iter_ctx)}}
-        {:error, reason} -> {:halt, {:error, reason}}
+        {:ok, chunk, new_iter_ctx} ->
+          {:cont, {:ok, [acc, chunk], Context.pop_scope(new_iter_ctx)}}
+
+        {:error, reason} ->
+          {:halt, {:error, reason}}
       end
     end)
   end
@@ -288,6 +291,9 @@ defmodule Alembic.Evaluator do
   defp to_output_string(value) when is_float(value), do: Float.to_string(value)
   defp to_output_string(true), do: "true"
   defp to_output_string(false), do: "false"
-  defp to_output_string(value) when is_list(value), do: Enum.map_join(value, "", &to_output_string/1)
+
+  defp to_output_string(value) when is_list(value),
+    do: Enum.map_join(value, "", &to_output_string/1)
+
   defp to_output_string(value), do: to_string(value)
 end

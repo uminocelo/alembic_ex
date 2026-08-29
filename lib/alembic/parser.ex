@@ -315,7 +315,8 @@ defmodule Alembic.Parser do
     split_top_level_commas(rest, [<<c::utf8>> | current], acc, quote)
   end
 
-  defp iodata_to_string(reversed_chars), do: reversed_chars |> Enum.reverse() |> IO.iodata_to_binary()
+  defp iodata_to_string(reversed_chars),
+    do: reversed_chars |> Enum.reverse() |> IO.iodata_to_binary()
 
   # ---- Shared helpers ----
 

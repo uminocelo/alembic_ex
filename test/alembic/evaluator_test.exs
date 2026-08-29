@@ -82,7 +82,8 @@ defmodule Alembic.EvaluatorTest do
     end
 
     test "elsif chain picks the first truthy branch" do
-      assert {:ok, "b"} = render("{% if x %}a{% elsif y %}b{% elsif z %}c{% endif %}", %{"y" => true})
+      assert {:ok, "b"} =
+               render("{% if x %}a{% elsif y %}b{% elsif z %}c{% endif %}", %{"y" => true})
     end
 
     test "falls through to else when no elsif matches" do
@@ -118,12 +119,15 @@ defmodule Alembic.EvaluatorTest do
 
   describe "for node" do
     test "iterates and concatenates output" do
-      assert {:ok, "abc"} = render("{% for i in items %}{{ i }}{% endfor %}", %{"items" => ["a", "b", "c"]})
+      assert {:ok, "abc"} =
+               render("{% for i in items %}{{ i }}{% endfor %}", %{"items" => ["a", "b", "c"]})
     end
 
     test "forloop metadata is accessible inside the body" do
       assert {:ok, "123"} =
-               render("{% for i in items %}{{ forloop.index }}{% endfor %}", %{"items" => ["a", "b", "c"]})
+               render("{% for i in items %}{{ forloop.index }}{% endfor %}", %{
+                 "items" => ["a", "b", "c"]
+               })
 
       assert {:ok, "0,1,2"} =
                render(
@@ -148,7 +152,8 @@ defmodule Alembic.EvaluatorTest do
     end
 
     test "empty iterable with else branch" do
-      assert {:ok, "empty"} = render("{% for i in items %}{{ i }}{% else %}empty{% endfor %}", %{"items" => []})
+      assert {:ok, "empty"} =
+               render("{% for i in items %}{{ i }}{% else %}empty{% endfor %}", %{"items" => []})
     end
 
     test "empty iterable without else branch renders empty string" do
@@ -163,7 +168,8 @@ defmodule Alembic.EvaluatorTest do
       # The loop's own body legitimately renders "a" once; if the loop
       # variable leaked, the trailing {{ i }} after the "-" would render
       # "a" too, giving "a-a" instead of "a-".
-      assert {:ok, "a-"} = render("{% for i in items %}{{ i }}{% endfor %}-{{ i }}", %{"items" => ["a"]})
+      assert {:ok, "a-"} =
+               render("{% for i in items %}{{ i }}{% endfor %}-{{ i }}", %{"items" => ["a"]})
     end
 
     test "nested for loops each have their own forloop metadata" do
@@ -215,18 +221,30 @@ defmodule Alembic.EvaluatorTest do
     test "large templates render without exceeding reasonable time (no O(n^2) string concat)" do
       items = Enum.map(1..2000, &Integer.to_string/1)
       {:ok, result} = render("{% for i in items %}{{ i }},{% endfor %}", %{"items" => items})
-      assert String.length(result) == Enum.reduce(items, 0, fn i, acc -> acc + String.length(i) + 1 end)
+
+      assert String.length(result) ==
+               Enum.reduce(items, 0, fn i, acc -> acc + String.length(i) + 1 end)
     end
   end
 
   describe "logical and comparison expressions" do
     test "and/or/not/compare inside a condition" do
-      assert {:ok, "yes"} = render("{% if x > 0 and not skip %}yes{% else %}no{% endif %}", %{"x" => 1, "skip" => false})
-      assert {:ok, "no"} = render("{% if x > 0 and not skip %}yes{% else %}no{% endif %}", %{"x" => 1, "skip" => true})
+      assert {:ok, "yes"} =
+               render("{% if x > 0 and not skip %}yes{% else %}no{% endif %}", %{
+                 "x" => 1,
+                 "skip" => false
+               })
+
+      assert {:ok, "no"} =
+               render("{% if x > 0 and not skip %}yes{% else %}no{% endif %}", %{
+                 "x" => 1,
+                 "skip" => true
+               })
     end
 
     test "contains operator" do
-      assert {:ok, "yes"} = render(~s({% if s contains "ell" %}yes{% else %}no{% endif %}), %{"s" => "hello"})
+      assert {:ok, "yes"} =
+               render(~s({% if s contains "ell" %}yes{% else %}no{% endif %}), %{"s" => "hello"})
     end
   end
 end

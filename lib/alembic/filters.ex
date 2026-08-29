@@ -83,8 +83,11 @@ defmodule Alembic.Filters do
 
   # ---- String filters ----
 
-  defp apply_builtin("upcase", value, []), do: {:ok, value |> coerce_to_string() |> String.upcase()}
-  defp apply_builtin("downcase", value, []), do: {:ok, value |> coerce_to_string() |> String.downcase()}
+  defp apply_builtin("upcase", value, []),
+    do: {:ok, value |> coerce_to_string() |> String.upcase()}
+
+  defp apply_builtin("downcase", value, []),
+    do: {:ok, value |> coerce_to_string() |> String.downcase()}
 
   defp apply_builtin("capitalize", value, []),
     do: {:ok, value |> coerce_to_string() |> String.capitalize()}
@@ -115,12 +118,20 @@ defmodule Alembic.Filters do
     do: {:ok, coerce_to_string(value) <> coerce_to_string(suffix)}
 
   defp apply_builtin("replace", value, [search, replacement]) do
-    {:ok, String.replace(coerce_to_string(value), coerce_to_string(search), coerce_to_string(replacement))}
+    {:ok,
+     String.replace(
+       coerce_to_string(value),
+       coerce_to_string(search),
+       coerce_to_string(replacement)
+     )}
   end
 
   defp apply_builtin("replace_first", value, [search, replacement]) do
     result =
-      String.replace(coerce_to_string(value), coerce_to_string(search), coerce_to_string(replacement),
+      String.replace(
+        coerce_to_string(value),
+        coerce_to_string(search),
+        coerce_to_string(replacement),
         global: false
       )
 
@@ -178,7 +189,10 @@ defmodule Alembic.Filters do
   # ---- Array filters ----
 
   defp apply_builtin("join", value, []), do: {:ok, Enum.join(value, "")}
-  defp apply_builtin("join", value, [separator]), do: {:ok, Enum.join(value, coerce_to_string(separator))}
+
+  defp apply_builtin("join", value, [separator]),
+    do: {:ok, Enum.join(value, coerce_to_string(separator))}
+
   defp apply_builtin("first", value, []), do: {:ok, List.first(value)}
   defp apply_builtin("last", value, []), do: {:ok, List.last(value)}
   defp apply_builtin("reverse", value, []), do: {:ok, Enum.reverse(value)}
@@ -219,8 +233,12 @@ defmodule Alembic.Filters do
     do: {:ok, Float.round(coerce_to_number(value) * 1.0, precision)}
 
   defp apply_builtin("plus", value, [n]), do: {:ok, coerce_to_number(value) + coerce_to_number(n)}
-  defp apply_builtin("minus", value, [n]), do: {:ok, coerce_to_number(value) - coerce_to_number(n)}
-  defp apply_builtin("times", value, [n]), do: {:ok, coerce_to_number(value) * coerce_to_number(n)}
+
+  defp apply_builtin("minus", value, [n]),
+    do: {:ok, coerce_to_number(value) - coerce_to_number(n)}
+
+  defp apply_builtin("times", value, [n]),
+    do: {:ok, coerce_to_number(value) * coerce_to_number(n)}
 
   defp apply_builtin("divided_by", value, [n]) do
     a = coerce_to_number(value)
@@ -233,9 +251,14 @@ defmodule Alembic.Filters do
     end
   end
 
-  defp apply_builtin("modulo", value, [n]), do: {:ok, rem(coerce_to_number(value), coerce_to_number(n))}
-  defp apply_builtin("at_least", value, [n]), do: {:ok, max(coerce_to_number(value), coerce_to_number(n))}
-  defp apply_builtin("at_most", value, [n]), do: {:ok, min(coerce_to_number(value), coerce_to_number(n))}
+  defp apply_builtin("modulo", value, [n]),
+    do: {:ok, rem(coerce_to_number(value), coerce_to_number(n))}
+
+  defp apply_builtin("at_least", value, [n]),
+    do: {:ok, max(coerce_to_number(value), coerce_to_number(n))}
+
+  defp apply_builtin("at_most", value, [n]),
+    do: {:ok, min(coerce_to_number(value), coerce_to_number(n))}
 
   # ---- Misc filters ----
 
@@ -266,7 +289,9 @@ defmodule Alembic.Filters do
 
   # ---- Helpers ----
 
-  defp item_key(item, key) when is_map(item), do: Map.get(item, key) || Map.get(item, safe_atom(key))
+  defp item_key(item, key) when is_map(item),
+    do: Map.get(item, key) || Map.get(item, safe_atom(key))
+
   defp item_key(item, key) when is_list(item), do: Keyword.get(item, safe_atom(key))
   defp item_key(_item, _key), do: nil
 

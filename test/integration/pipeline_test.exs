@@ -17,7 +17,9 @@ defmodule Alembic.Integration.PipelineTest do
 
     test "variable output: simple, dot-path, bracket-equivalent" do
       assert {:ok, "Alice"} = Alembic.render_string("{{ name }}", %{"name" => "Alice"})
-      assert {:ok, "Lisbon"} = Alembic.render_string("{{ user.city }}", %{"user" => %{"city" => "Lisbon"}})
+
+      assert {:ok, "Lisbon"} =
+               Alembic.render_string("{{ user.city }}", %{"user" => %{"city" => "Lisbon"}})
     end
 
     test "if with all branch combinations" do
@@ -47,7 +49,10 @@ defmodule Alembic.Integration.PipelineTest do
     end
 
     test "filter chain with multiple filters" do
-      assert {:ok, "HEL"} = Alembic.render_string("{{ name | upcase | truncate: 3, \"\" }}", %{"name" => "hello"})
+      assert {:ok, "HEL"} =
+               Alembic.render_string("{{ name | upcase | truncate: 3, \"\" }}", %{
+                 "name" => "hello"
+               })
     end
 
     test "whitespace control strips" do

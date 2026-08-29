@@ -147,7 +147,8 @@ defmodule Alembic.Lexer do
   # tag `{% <end_name> %}` (or a whitespace-stripped variant) is found.
   # Used for `{% comment %}` / `{% raw %}` blocks, whose contents must not be
   # tokenized as ordinary Liquid syntax.
-  defp scan_until_end_tag(input, end_name, state), do: scan_until_end_tag(input, end_name, state, [])
+  defp scan_until_end_tag(input, end_name, state),
+    do: scan_until_end_tag(input, end_name, state, [])
 
   defp scan_until_end_tag(input, end_name, state, acc) do
     case try_end_tag(input, end_name, state) do
@@ -167,8 +168,12 @@ defmodule Alembic.Lexer do
     end
   end
 
-  defp try_end_tag("{%-" <> rest, end_name, state), do: match_end_tag_body(rest, end_name, advance(state, 3))
-  defp try_end_tag("{%" <> rest, end_name, state), do: match_end_tag_body(rest, end_name, advance(state, 2))
+  defp try_end_tag("{%-" <> rest, end_name, state),
+    do: match_end_tag_body(rest, end_name, advance(state, 3))
+
+  defp try_end_tag("{%" <> rest, end_name, state),
+    do: match_end_tag_body(rest, end_name, advance(state, 2))
+
   defp try_end_tag(_input, _end_name, _state), do: :no
 
   defp match_end_tag_body(rest, end_name, state) do

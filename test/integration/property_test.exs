@@ -42,7 +42,7 @@ defmodule Alembic.Integration.PropertyTest do
   end
 
   defp random_scalar do
-    case Enum.random([:string, :int, :float, :bool, :nil]) do
+    case Enum.random([:string, :int, :float, :bool, nil]) do
       :string ->
         s = random_text()
         {s, s}
@@ -59,7 +59,7 @@ defmodule Alembic.Integration.PropertyTest do
         b = Enum.random([true, false])
         {b, to_string(b)}
 
-      :nil ->
+      nil ->
         {nil, ""}
     end
   end

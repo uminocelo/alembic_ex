@@ -67,15 +67,22 @@ defmodule Alembic.Parser.ExpressionTest do
 
   describe "comparison operators" do
     test "equality and inequality" do
-      assert {:ok, {:compare, :eq, {:variable, ["x"]}, {:literal, 1}}} = Expression.parse("x == 1")
-      assert {:ok, {:compare, :neq, {:variable, ["x"]}, {:literal, 1}}} = Expression.parse("x != 1")
+      assert {:ok, {:compare, :eq, {:variable, ["x"]}, {:literal, 1}}} =
+               Expression.parse("x == 1")
+
+      assert {:ok, {:compare, :neq, {:variable, ["x"]}, {:literal, 1}}} =
+               Expression.parse("x != 1")
     end
 
     test "relational operators" do
       assert {:ok, {:compare, :gt, {:variable, ["x"]}, {:literal, 0}}} = Expression.parse("x > 0")
       assert {:ok, {:compare, :lt, {:variable, ["x"]}, {:literal, 0}}} = Expression.parse("x < 0")
-      assert {:ok, {:compare, :gte, {:variable, ["x"]}, {:literal, 0}}} = Expression.parse("x >= 0")
-      assert {:ok, {:compare, :lte, {:variable, ["x"]}, {:literal, 0}}} = Expression.parse("x <= 0")
+
+      assert {:ok, {:compare, :gte, {:variable, ["x"]}, {:literal, 0}}} =
+               Expression.parse("x >= 0")
+
+      assert {:ok, {:compare, :lte, {:variable, ["x"]}, {:literal, 0}}} =
+               Expression.parse("x <= 0")
     end
 
     test "contains operator" do
@@ -98,7 +105,9 @@ defmodule Alembic.Parser.ExpressionTest do
     end
 
     test "chained and is left-associative" do
-      assert {:ok, {:logical, :and, {:logical, :and, {:variable, ["a"]}, {:variable, ["b"]}}, {:variable, ["c"]}}} =
+      assert {:ok,
+              {:logical, :and, {:logical, :and, {:variable, ["a"]}, {:variable, ["b"]}},
+               {:variable, ["c"]}}} =
                Expression.parse("a and b and c")
     end
 
@@ -122,7 +131,8 @@ defmodule Alembic.Parser.ExpressionTest do
     end
 
     test "filter with a single argument" do
-      assert {:ok, {:filter_chain, {:variable, ["name"]}, [{:filter, "truncate", [{:literal, 30}]}]}} =
+      assert {:ok,
+              {:filter_chain, {:variable, ["name"]}, [{:filter, "truncate", [{:literal, 30}]}]}} =
                Expression.parse("name | truncate: 30")
     end
 
@@ -143,6 +153,20 @@ defmodule Alembic.Parser.ExpressionTest do
     test "filter arguments may be variables" do
       assert {:ok, {:filter_chain, _, [{:filter, "default", [{:variable, ["site", "title"]}]}]}} =
                Expression.parse("title | default: site.title")
+    end
+
+    test "a filter with an argument followed by another filter continues the outer chain" do
+      # Regression: `x | f: arg | g` must parse as `(x | f: arg) | g`, not
+      # `x | f: (arg | g)` — an earlier version of this parser let the
+      # trailing `| g` be swallowed into `f`'s own argument instead of
+      # continuing the chain on `x`.
+      assert {:ok,
+              {:filter_chain, {:variable, ["total"]},
+               [
+                 {:filter, "default", [{:literal, 0}]},
+                 {:filter, "plus", [{:variable, ["item", "price"]}]}
+               ]}} =
+               Expression.parse("total | default: 0 | plus: item.price")
     end
 
     test "bare variable with no filters is not wrapped" do

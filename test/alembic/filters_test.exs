@@ -11,13 +11,15 @@ defmodule Alembic.FiltersTest do
     end
 
     test "known filter with wrong argument shape" do
-      assert {:error, {:invalid_filter_args, "upcase", [1, 2]}} = Filters.apply("upcase", "x", [1, 2])
+      assert {:error, {:invalid_filter_args, "upcase", [1, 2]}} =
+               Filters.apply("upcase", "x", [1, 2])
     end
   end
 
   describe "apply_chain/3" do
     test "applies filters left to right, each output feeding the next" do
-      assert {:ok, "HEL"} = Filters.apply_chain("hello", [{"upcase", []}, {"truncate", [3, ""]}], nil)
+      assert {:ok, "HEL"} =
+               Filters.apply_chain("hello", [{"upcase", []}, {"truncate", [3, ""]}], nil)
     end
 
     test "short-circuits on the first error" do
@@ -172,7 +174,9 @@ defmodule Alembic.FiltersTest do
 
     test "base64_decode" do
       assert {:ok, "hello"} = Filters.apply("base64_decode", "aGVsbG8=", [])
-      assert {:error, {:invalid_base64, "not base64!!"}} = Filters.apply("base64_decode", "not base64!!", [])
+
+      assert {:error, {:invalid_base64, "not base64!!"}} =
+               Filters.apply("base64_decode", "not base64!!", [])
     end
 
     test "size on a string counts characters, not bytes" do

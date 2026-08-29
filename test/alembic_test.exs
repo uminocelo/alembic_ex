@@ -12,11 +12,13 @@ defmodule AlembicTest do
     end
 
     test "compile surfaces a lexer error" do
-      assert {:error, {:lexer, {:unterminated_output, %{line: 1, col: 1}}}} = Alembic.compile("{{ name")
+      assert {:error, {:lexer, {:unterminated_output, %{line: 1, col: 1}}}} =
+               Alembic.compile("{{ name")
     end
 
     test "compile surfaces a parser error" do
-      assert {:error, {:parser, {:missing_end_tag, "endif"}}} = Alembic.compile("{% if x %}no close")
+      assert {:error, {:parser, {:missing_end_tag, "endif"}}} =
+               Alembic.compile("{% if x %}no close")
     end
   end
 
@@ -96,6 +98,16 @@ defmodule AlembicTest do
 
       assert_raise Alembic.TemplateError, fn ->
         Alembic.render!(ast, %{}, strict: true)
+      end
+    end
+
+    test "render_string! returns the rendered output on success" do
+      assert "Hi Alice" = Alembic.render_string!("Hi {{ user }}", %{"user" => "Alice"})
+    end
+
+    test "render_string! raises Alembic.TemplateError on error" do
+      assert_raise Alembic.TemplateError, fn ->
+        Alembic.render_string!("{{ x }}", %{}, strict: true)
       end
     end
 

@@ -12,7 +12,12 @@ defmodule Alembic.Context do
   defstruct scopes: [], assigns: %{}, strict: false, loader_fn: nil
 
   @type loader_fn :: (String.t() -> {:ok, String.t()} | {:error, term()})
-  @type t :: %__MODULE__{scopes: [map()], assigns: map(), strict: boolean(), loader_fn: loader_fn() | nil}
+  @type t :: %__MODULE__{
+          scopes: [map()],
+          assigns: map(),
+          strict: boolean(),
+          loader_fn: loader_fn() | nil
+        }
 
   @doc """
   Wraps an initial bindings map as the root scope.
@@ -60,7 +65,8 @@ defmodule Alembic.Context do
       true
   """
   @spec loader(t(), loader_fn()) :: t()
-  def loader(%__MODULE__{} = ctx, loader_fn) when is_function(loader_fn, 1), do: %{ctx | loader_fn: loader_fn}
+  def loader(%__MODULE__{} = ctx, loader_fn) when is_function(loader_fn, 1),
+    do: %{ctx | loader_fn: loader_fn}
 
   @doc """
   Pushes a new innermost scope (entering a `{% for %}` body or an

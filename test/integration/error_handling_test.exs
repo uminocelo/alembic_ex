@@ -28,7 +28,10 @@ defmodule Alembic.Integration.ErrorHandlingTest do
 
   test "bang variants wrap every error in Alembic.TemplateError" do
     assert_raise Alembic.TemplateError, fn -> Alembic.compile!("{{ name") end
-    assert_raise Alembic.TemplateError, fn -> Alembic.render_file!("nope.html", %{}, roots: [@templates_root]) end
+
+    assert_raise Alembic.TemplateError, fn ->
+      Alembic.render_file!("nope.html", %{}, roots: [@templates_root])
+    end
 
     assert_raise Alembic.TemplateError, fn ->
       Alembic.render!(Alembic.compile!("{{ x }}"), %{}, strict: true)
