@@ -31,6 +31,30 @@ defmodule Alembic.ParserTest do
     end
   end
 
+  describe "whitespace control" do
+    test "strip_left trims trailing whitespace off the preceding text" do
+      assert {:ok, [{:text, "Hello"}, {:output, ["name"], []}]} = parse("Hello   {{- name }}")
+    end
+
+    test "strip_right trims leading whitespace off the following text" do
+      assert {:ok, [{:output, ["name"], []}, {:text, "World"}]} = parse("{{ name -}}   World")
+    end
+
+    test "strip on both sides of a tag trims both neighbors" do
+      assert {:ok, [{:text, "Hello"}, {:if, _cond, [{:text, "yes"}], [], nil}, {:text, "World"}]} =
+               parse("Hello \n  {%- if x %}yes{% endif -%}\n  World")
+    end
+
+    test "no adjacent text token is a no-op, not an error" do
+      assert {:ok, [{:output, ["name"], []}]} = parse("{{- name -}}")
+    end
+
+    test "without strip markers, surrounding whitespace is preserved" do
+      assert {:ok, [{:text, "Hello   "}, {:output, ["name"], []}, {:text, "   World"}]} =
+               parse("Hello   {{ name }}   World")
+    end
+  end
+
   describe "if block" do
     test "if with else" do
       assert {:ok, [{:if, _condition, [{:text, "yes"}], [], [{:text, "no"}]}]} =

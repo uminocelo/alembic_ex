@@ -10,6 +10,17 @@ defmodule Alembic.Parser do
   `Alembic.Token.t()` carries no position metadata (that constraint comes
   from Milestone 1.1/1.2), so parser errors below cannot include `line`/`col`
   — only the Lexer's own errors do.
+
+  ## Whitespace control is resolved here, not in the Evaluator
+
+  `Alembic.AST` node types have no field for `strip_left`/`strip_right` —
+  adding one would mean threading strip intent through every node shape and
+  back out again at render time. Instead, `parse/1` resolves whitespace
+  control immediately, as a pass over the raw token list before any node is
+  built: an output/tag token's `strip_left`/`strip_right` flag trims the
+  adjacent `:text` token in place. By the time `parse_template/1` builds the
+  AST, the whitespace is already gone — the tree the Evaluator walks needs no
+  strip metadata at all.
   """
 
   alias Alembic.{AST, Parser.Expression, Token}
@@ -28,10 +39,59 @@ defmodule Alembic.Parser do
 
   @spec parse([Token.t()]) :: {:ok, AST.t()} | {:error, reason()}
   def parse(tokens) when is_list(tokens) do
-    case parse_template(tokens) do
+    case tokens |> apply_whitespace_control() |> parse_template() do
       {:ok, nodes, []} -> validate_extends_position(nodes)
       {:ok, _nodes, [token | _rest]} -> {:error, {:unexpected_token, token}}
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # ---- Whitespace control: strip flags trim adjacent :text tokens in place ----
+
+  defp apply_whitespace_control(tokens) do
+    tuple = List.to_tuple(tokens)
+
+    tuple
+    |> strip_right_pass()
+    |> strip_left_pass()
+    |> Tuple.to_list()
+  end
+
+  defp strip_right_pass(tuple) when tuple_size(tuple) < 2, do: tuple
+
+  defp strip_right_pass(tuple) do
+    Enum.reduce(0..(tuple_size(tuple) - 2)//1, tuple, fn i, acc ->
+      if strip_right?(elem(acc, i)), do: trim_text_at(acc, i + 1, :leading), else: acc
+    end)
+  end
+
+  defp strip_left_pass(tuple) when tuple_size(tuple) < 2, do: tuple
+
+  defp strip_left_pass(tuple) do
+    Enum.reduce(1..(tuple_size(tuple) - 1)//1, tuple, fn i, acc ->
+      if strip_left?(elem(acc, i)), do: trim_text_at(acc, i - 1, :trailing), else: acc
+    end)
+  end
+
+  defp strip_right?({:output, _content, _sl, true}), do: true
+  defp strip_right?({:tag, _content, _sl, true}), do: true
+  defp strip_right?(_token), do: false
+
+  defp strip_left?({:output, _content, true, _sr}), do: true
+  defp strip_left?({:tag, _content, true, _sr}), do: true
+  defp strip_left?(_token), do: false
+
+  defp trim_text_at(tuple, index, :leading) do
+    case elem(tuple, index) do
+      {:text, content} -> put_elem(tuple, index, {:text, String.trim_leading(content)})
+      _other -> tuple
+    end
+  end
+
+  defp trim_text_at(tuple, index, :trailing) do
+    case elem(tuple, index) do
+      {:text, content} -> put_elem(tuple, index, {:text, String.trim_trailing(content)})
+      _other -> tuple
     end
   end
 
