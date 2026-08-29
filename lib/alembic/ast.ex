@@ -3,7 +3,15 @@ defmodule Alembic.AST do
 
   @type path :: [String.t()]
   @type literal :: String.t() | number() | boolean() | nil
-  @type expr :: {:variable, path()} | {:literal, literal()} | {:filter_chain, expr(), [filter()]}
+  @type compare_op :: :eq | :neq | :gt | :lt | :gte | :lte | :contains
+  @type logical_op :: :and | :or
+  @type expr ::
+          {:variable, path()}
+          | {:literal, literal()}
+          | {:filter_chain, expr(), [filter()]}
+          | {:compare, compare_op(), expr(), expr()}
+          | {:logical, logical_op(), expr(), expr()}
+          | {:not, expr()}
   @type filter :: {:filter, String.t(), [expr()]}
   @type text_node :: {:text, String.t()}
   @type output_node :: {:output, path(), [filter()]}
