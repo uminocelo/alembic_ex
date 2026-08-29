@@ -67,7 +67,8 @@ defmodule Alembic.Cache do
       iex> Alembic.Cache.get(path)
       :miss
 
-      iex> path = Path.join(System.tmp_dir!(), "alembic_cache_doctest.html")
+      iex> path = Path.join(System.tmp_dir!(), "alembic_cache_doctest_hit.html")
+      iex> File.write!(path, "content")
       iex> Alembic.Cache.put(path, [{:text, "hello"}])
       iex> Alembic.Cache.sweep()
       iex> Alembic.Cache.get(path)
