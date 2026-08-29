@@ -37,6 +37,20 @@ defmodule Alembic.Parser do
           | {:malformed_include, term()}
           | {:unexpected_tag, String.t()}
 
+  @doc """
+  Turns a token list (from `Alembic.Lexer.tokenize/1`) into an
+  `Alembic.AST.t()`.
+
+  ## Examples
+
+      iex> {:ok, tokens} = Alembic.Lexer.tokenize("{% if x %}hi{% endif %}")
+      iex> Alembic.Parser.parse(tokens)
+      {:ok, [{:if, {:variable, ["x"]}, [{:text, "hi"}], [], nil}]}
+
+      iex> {:ok, tokens} = Alembic.Lexer.tokenize("{% if x %}no close")
+      iex> Alembic.Parser.parse(tokens)
+      {:error, {:missing_end_tag, "endif"}}
+  """
   @spec parse([Token.t()]) :: {:ok, AST.t()} | {:error, reason()}
   def parse(tokens) when is_list(tokens) do
     case tokens |> apply_whitespace_control() |> parse_template() do

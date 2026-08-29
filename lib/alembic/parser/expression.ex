@@ -29,6 +29,23 @@ defmodule Alembic.Parser.Expression do
           | {:unknown_operator, String.t()}
           | {:unexpected_token, term()}
 
+  @doc """
+  Parses the raw string content of an output tag or a tag condition into an
+  `Alembic.AST.expr()`.
+
+  ## Examples
+
+      iex> Alembic.Parser.Expression.parse("user.name")
+      {:ok, {:variable, ["user", "name"]}}
+
+      iex> Alembic.Parser.Expression.parse("name | upcase")
+      {:ok, {:filter_chain, {:variable, ["name"]}, [{:filter, "upcase", []}]}}
+
+      iex> Alembic.Parser.Expression.parse("x > 0 and not skip")
+      {:ok,
+       {:logical, :and, {:compare, :gt, {:variable, ["x"]}, {:literal, 0}},
+        {:not, {:variable, ["skip"]}}}}
+  """
   @spec parse(String.t()) :: {:ok, AST.expr()} | {:error, reason()}
   def parse(source) when is_binary(source) do
     case String.trim(source) do

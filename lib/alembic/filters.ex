@@ -24,6 +24,22 @@ defmodule Alembic.Filters do
           | {:invalid_base64, String.t()}
           | {:invalid_date, any()}
 
+  @doc """
+  Applies a single named filter. Checks `config :alembic, :custom_filters`
+  first (matched by `c:Alembic.Filter.name/0`), then falls back to the
+  built-in catalog.
+
+  ## Examples
+
+      iex> Alembic.Filters.apply("upcase", "hello", [])
+      {:ok, "HELLO"}
+
+      iex> Alembic.Filters.apply("truncate", "hello world", [5])
+      {:ok, "he..."}
+
+      iex> Alembic.Filters.apply("nope", "x", [])
+      {:error, {:unknown_filter, "nope"}}
+  """
   @spec apply(String.t(), any(), [any()]) :: {:ok, any()} | {:error, reason()}
   def apply(name, value, args) do
     case custom_filter_module(name) do
@@ -32,6 +48,18 @@ defmodule Alembic.Filters do
     end
   end
 
+  @doc """
+  Applies a full filter chain in order, the output of each filter feeding
+  the next. Short-circuits on the first error.
+
+  ## Examples
+
+      iex> Alembic.Filters.apply_chain("hello", [{"upcase", []}, {"truncate", [3, ""]}], nil)
+      {:ok, "HEL"}
+
+      iex> Alembic.Filters.apply_chain("hello", [], nil)
+      {:ok, "hello"}
+  """
   @spec apply_chain(any(), [{String.t(), [any()]}], Alembic.Context.t()) ::
           {:ok, any()} | {:error, reason()}
   def apply_chain(value, filters, _ctx) do

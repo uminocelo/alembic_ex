@@ -14,6 +14,9 @@ defmodule Alembic.Filter do
   to the module that should handle it.
   """
 
+  @doc "The filter name as it appears in a template's pipe chain, e.g. `\"money\"` for `{{ price | money }}`."
   @callback name() :: String.t()
+
+  @doc "Transforms `value` given the filter's (already-evaluated) `args`."
   @callback apply(value :: any(), args :: [any()]) :: {:ok, any()} | {:error, reason :: any()}
 end

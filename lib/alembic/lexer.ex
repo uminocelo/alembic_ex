@@ -18,6 +18,17 @@ defmodule Alembic.Lexer do
           | {:unterminated_comment, position()}
           | {:unterminated_raw, position()}
 
+  @doc """
+  Converts raw template source into a flat list of `Alembic.Token.t()`.
+
+  ## Examples
+
+      iex> Alembic.Lexer.tokenize("Hello {{ name }}!")
+      {:ok, [{:text, "Hello "}, {:output, "name", false, false}, {:text, "!"}]}
+
+      iex> Alembic.Lexer.tokenize("{{ name")
+      {:error, {:unterminated_output, %{line: 1, col: 1}}}
+  """
   @spec tokenize(String.t()) :: {:ok, [Token.t()]} | {:error, reason()}
   def tokenize(source) when is_binary(source) do
     do_tokenize(source, %State{})

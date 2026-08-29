@@ -19,12 +19,40 @@ defmodule Alembic.Evaluator do
   `{:extends, _}` / `{:block, _, _}` nodes are never seen here: they are
   resolved away by `Alembic.Inheritance.preprocess/2` one level up, in the
   top-level render pipeline, before `eval/2` is called.
+
+  `{:include, name, variables}` loads and evaluates a partial via
+  `ctx.loader_fn` (see `Alembic.Context.loader/2`) — the included template
+  runs in a child scope seeded with `variables`, so it can still see the
+  including template's own scopes/assigns (classic `{% include %}`
+  semantics, not an isolated `{% render %}`). It is not run through
+  `Alembic.Inheritance.preprocess/2` — a partial is not expected to use
+  `extends`/`block` itself.
   """
 
-  alias Alembic.{AST, Context, Filters}
+  alias Alembic.{AST, Context, Filters, Lexer, Parser}
 
-  @type reason :: {:unknown_variable, [String.t()]} | Filters.reason()
+  @type reason ::
+          {:undefined_variable, [String.t()]}
+          | {:include_not_found, String.t(), term()}
+          | :include_loader_not_configured
+          | {:include_compile_error, term()}
+          | Filters.reason()
 
+  @doc """
+  Renders an AST against a `Alembic.Context`, producing the final output
+  string.
+
+  ## Examples
+
+      iex> ast = [{:text, "Hello, "}, {:output, ["name"], []}, {:text, "!"}]
+      iex> Alembic.Evaluator.eval(ast, Alembic.Context.new(%{"name" => "World"}))
+      {:ok, "Hello, World!"}
+
+      iex> ast = [{:output, ["missing"], []}]
+      iex> ctx = Alembic.Context.new(%{}) |> Alembic.Context.strict(true)
+      iex> Alembic.Evaluator.eval(ast, ctx)
+      {:error, {:undefined_variable, ["missing"]}}
+  """
   @spec eval([AST.ast_node()], Context.t()) :: {:ok, String.t()} | {:error, reason()}
   def eval(nodes, %Context{} = ctx) when is_list(nodes) do
     case eval_nodes(nodes, ctx) do
@@ -48,13 +76,8 @@ defmodule Alembic.Evaluator do
   defp eval_node({:text, content}, ctx), do: {:ok, content, ctx}
 
   defp eval_node({:output, path, filters}, ctx) do
-    value =
-      case Context.resolve_path(ctx, path) do
-        {:ok, resolved} -> resolved
-        :not_found -> nil
-      end
-
-    with {:ok, filter_pairs} <- eval_filter_list(filters, ctx),
+    with {:ok, value} <- resolve_or_error(ctx, path),
+         {:ok, filter_pairs} <- eval_filter_list(filters, ctx),
          {:ok, filtered} <- Filters.apply_chain(value, filter_pairs, ctx) do
       {:ok, to_output_string(filtered), ctx}
     end
@@ -82,6 +105,20 @@ defmodule Alembic.Evaluator do
   defp eval_node({:assign, var, expr}, ctx) do
     with {:ok, value} <- eval_expr(expr, ctx) do
       {:ok, "", Context.assign(ctx, var, value)}
+    end
+  end
+
+  defp eval_node({:include, name, variables}, ctx) do
+    with {:ok, loader_fn} <- require_loader(ctx),
+         {:ok, source} <- call_loader(loader_fn, name),
+         {:ok, ast} <- compile_include(source),
+         {:ok, resolved_vars} <- eval_var_map(variables, ctx) do
+      include_ctx = Context.push_scope(ctx, resolved_vars)
+
+      case eval_nodes(ast, include_ctx) do
+        {:ok, chunk, new_include_ctx} -> {:ok, chunk, Context.pop_scope(new_include_ctx)}
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
 
@@ -119,14 +156,50 @@ defmodule Alembic.Evaluator do
   defp coerce_to_list(value) when is_list(value), do: value
   defp coerce_to_list(_other), do: []
 
-  # ---- Expression evaluation ----
+  defp require_loader(%Context{loader_fn: nil}), do: {:error, :include_loader_not_configured}
+  defp require_loader(%Context{loader_fn: loader_fn}), do: {:ok, loader_fn}
 
-  defp eval_expr({:variable, path}, ctx) do
+  defp call_loader(loader_fn, name) do
+    case loader_fn.(name) do
+      {:ok, source} -> {:ok, source}
+      {:error, reason} -> {:error, {:include_not_found, name, reason}}
+    end
+  end
+
+  defp compile_include(source) do
+    with {:ok, tokens} <- Lexer.tokenize(source),
+         {:ok, ast} <- Parser.parse(tokens) do
+      {:ok, ast}
+    else
+      {:error, reason} -> {:error, {:include_compile_error, reason}}
+    end
+  end
+
+  defp eval_var_map(variables, ctx) do
+    Enum.reduce_while(variables, {:ok, %{}}, fn {key, expr}, {:ok, acc} ->
+      case eval_expr(expr, ctx) do
+        {:ok, value} -> {:cont, {:ok, Map.put(acc, key, value)}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+  end
+
+  # Lenient by default: an undefined path resolves to nil (output renders
+  # ""; conditions treat it as falsy). Strict mode — set on the Context via
+  # `Alembic.Context.strict/2`, driven by `Alembic.render/3`'s `strict:
+  # true` option — turns that into a hard error instead, at the exact point
+  # a path fails to resolve, whether inside an output tag or an expression.
+  defp resolve_or_error(ctx, path) do
     case Context.resolve_path(ctx, path) do
       {:ok, value} -> {:ok, value}
+      :not_found when ctx.strict -> {:error, {:undefined_variable, path}}
       :not_found -> {:ok, nil}
     end
   end
+
+  # ---- Expression evaluation ----
+
+  defp eval_expr({:variable, path}, ctx), do: resolve_or_error(ctx, path)
 
   defp eval_expr({:literal, value}, _ctx), do: {:ok, value}
 

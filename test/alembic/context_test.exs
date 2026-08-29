@@ -1,6 +1,8 @@
 defmodule Alembic.ContextTest do
   use ExUnit.Case, async: true
 
+  doctest Alembic.Context
+
   alias Alembic.Context
 
   describe "construction" do

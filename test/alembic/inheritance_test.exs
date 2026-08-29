@@ -1,6 +1,8 @@
 defmodule Alembic.InheritanceTest do
   use ExUnit.Case, async: true
 
+  doctest Alembic.Inheritance
+
   alias Alembic.{Context, Evaluator, Inheritance, Lexer, Parser}
 
   defp compile(source) do

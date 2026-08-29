@@ -1,6 +1,8 @@
 defmodule Alembic.LexerTest do
   use ExUnit.Case, async: true
 
+  doctest Alembic.Lexer
+
   alias Alembic.Lexer
 
   describe "tokenize/2" do

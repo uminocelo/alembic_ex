@@ -57,25 +57,77 @@ defmodule Alembic.Inheritance do
           | {:parent_compile_error, term()}
           | term()
 
-  @max_depth 10
+  @default_max_depth 10
 
+  @doc """
+  Pass 1 — walks an AST (recursing into `if`/`for` branches) and collects
+  its `{:block, name, body}` definitions into a `name => body` map.
+
+  ## Examples
+
+      iex> ast = [{:text, "<html>"}, {:block, "title", [{:text, "Default"}]}, {:text, "</html>"}]
+      iex> Alembic.Inheritance.collect_blocks(ast)
+      {:ok, %{"title" => [{:text, "Default"}]}}
+  """
   @spec collect_blocks([AST.ast_node()]) ::
           {:ok, %{String.t() => [AST.ast_node()]}} | {:error, {:duplicate_block, String.t()}}
   def collect_blocks(nodes), do: do_collect_blocks(nodes, %{})
 
+  @doc """
+  Pass 2 — walks an AST, splicing each `{:block, name, default}` node's
+  body for `child_blocks[name]` when present, keeping `default` otherwise.
+  `{:block, _, _}` nodes never survive into the result.
+
+  ## Examples
+
+      iex> parent = [{:text, "<a>"}, {:block, "x", [{:text, "default"}]}, {:text, "</a>"}]
+      iex> Alembic.Inheritance.resolve(parent, %{"x" => [{:text, "override"}]})
+      [{:text, "<a>"}, {:text, "override"}, {:text, "</a>"}]
+  """
   @spec resolve([AST.ast_node()], %{String.t() => [AST.ast_node()]}) :: [AST.ast_node()]
   def resolve(nodes, child_blocks), do: Enum.flat_map(nodes, &resolve_node(&1, child_blocks))
 
+  @doc """
+  Walks a `{:extends, _}` chain to its root ancestor, merging each level's
+  blocks as it goes (closer-to-child levels win), then resolves once
+  against the root's own AST. `loader_fn` fetches a parent template's
+  source given its name — see `Alembic.Loader.build_loader/1`.
+
+  ## Examples
+
+      iex> base_source = ~s(<html>{% block title %}Default{% endblock %}</html>)
+      iex> loader = fn "base.html" -> {:ok, base_source} end
+      iex> {:ok, tokens} = Alembic.Lexer.tokenize(~s({% extends "base.html" %}{% block title %}Custom{% endblock %}))
+      iex> {:ok, child_ast} = Alembic.Parser.parse(tokens)
+      iex> Alembic.Inheritance.resolve_chain(child_ast, loader)
+      {:ok, [{:text, "<html>"}, {:text, "Custom"}, {:text, "</html>"}]}
+  """
   @spec resolve_chain([AST.ast_node()], loader_fn(), MapSet.t()) ::
           {:ok, [AST.ast_node()]} | {:error, reason()}
   def resolve_chain(ast, loader_fn, visited \\ MapSet.new()) do
     do_resolve_chain(ast, loader_fn, visited, %{})
   end
 
+  @doc """
+  Entry point for the top-level render pipeline, called before
+  `Alembic.Evaluator.eval/2`. When the AST has no top-level `{:extends, _}`,
+  it still runs through `resolve/2` with an empty override map — a
+  template can itself define `{:block, _, _}` nodes (a "base" layout,
+  rendered standalone rather than through a child that extends it) and
+  those still need their default bodies spliced in; the Evaluator has no
+  clause for a raw `:block` node.
+
+  ## Examples
+
+      iex> {:ok, tokens} = Alembic.Lexer.tokenize("hello {{ name }}")
+      iex> {:ok, ast} = Alembic.Parser.parse(tokens)
+      iex> Alembic.Inheritance.preprocess(ast, fn _ -> {:error, :unused} end)
+      {:ok, [{:text, "hello "}, {:output, ["name"], []}]}
+  """
   @spec preprocess([AST.ast_node()], loader_fn()) :: {:ok, [AST.ast_node()]} | {:error, reason()}
   def preprocess(ast, loader_fn) do
     case find_extends(ast) do
-      nil -> {:ok, ast}
+      nil -> {:ok, resolve(ast, %{})}
       _parent_name -> resolve_chain(ast, loader_fn)
     end
   end
@@ -168,7 +220,7 @@ defmodule Alembic.Inheritance do
 
   defp load_parent(parent_name, loader_fn, visited, merged_blocks) do
     cond do
-      MapSet.size(visited) >= @max_depth ->
+      MapSet.size(visited) >= max_depth() ->
         {:error, :inheritance_depth_exceeded}
 
       MapSet.member?(visited, parent_name) ->
@@ -184,6 +236,8 @@ defmodule Alembic.Inheritance do
 
   defp find_extends([{:extends, name} | _rest]), do: name
   defp find_extends(_ast), do: nil
+
+  defp max_depth, do: Application.get_env(:alembic, :max_inheritance_depth, @default_max_depth)
 
   defp compile_source(source) do
     with {:ok, tokens} <- Lexer.tokenize(source),

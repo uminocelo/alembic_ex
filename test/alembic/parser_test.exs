@@ -1,6 +1,8 @@
 defmodule Alembic.ParserTest do
   use ExUnit.Case, async: true
 
+  doctest Alembic.Parser
+
   alias Alembic.{Lexer, Parser}
 
   defp parse(source) do

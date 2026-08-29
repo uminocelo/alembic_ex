@@ -1,6 +1,8 @@
 defmodule Alembic.EvaluatorTest do
   use ExUnit.Case, async: true
 
+  doctest Alembic.Evaluator
+
   alias Alembic.{Context, Evaluator, Lexer, Parser}
 
   defp render(source, bindings \\ %{}) do
@@ -34,6 +36,32 @@ defmodule Alembic.EvaluatorTest do
 
     test "an unknown filter propagates as an error" do
       assert {:error, {:unknown_filter, "nope"}} = render("{{ name | nope }}", %{"name" => "x"})
+    end
+  end
+
+  describe "strict mode (Context.strict/2)" do
+    test "an undefined variable in an output tag errors instead of rendering empty" do
+      ctx = Context.new(%{}) |> Context.strict(true)
+      ast = [{:output, ["missing"], []}]
+      assert {:error, {:undefined_variable, ["missing"]}} = Evaluator.eval(ast, ctx)
+    end
+
+    test "an undefined variable inside a condition also errors" do
+      ctx = Context.new(%{}) |> Context.strict(true)
+      ast = [{:if, {:variable, ["missing"]}, [{:text, "yes"}], [], nil}]
+      assert {:error, {:undefined_variable, ["missing"]}} = Evaluator.eval(ast, ctx)
+    end
+
+    test "a defined variable renders normally even in strict mode" do
+      ctx = Context.new(%{"name" => "Alice"}) |> Context.strict(true)
+      ast = [{:output, ["name"], []}]
+      assert {:ok, "Alice"} = Evaluator.eval(ast, ctx)
+    end
+
+    test "strict mode is off by default" do
+      ctx = Context.new(%{})
+      ast = [{:output, ["missing"], []}]
+      assert {:ok, ""} = Evaluator.eval(ast, ctx)
     end
   end
 

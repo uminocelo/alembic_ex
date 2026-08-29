@@ -1,0 +1,8 @@
+# mix.exs's `package: [files: [...]]` is an explicit allowlist, which is
+# already the authoritative source of what ships in the Hex package — this
+# file is mostly redundant with it, but listed per issue 1.5.5's task list
+# for defense in depth (e.g. if `files:` is ever loosened to a directory
+# glob in the future).
+bench/
+test/
+docs/diagrams/

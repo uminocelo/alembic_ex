@@ -1,6 +1,8 @@
 defmodule Alembic.Parser.ExpressionTest do
   use ExUnit.Case, async: true
 
+  doctest Alembic.Parser.Expression
+
   alias Alembic.Parser.Expression
 
   describe "variable paths" do
