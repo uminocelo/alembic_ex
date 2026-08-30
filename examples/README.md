@@ -19,7 +19,7 @@ mix run examples/08_error_handling.exs
 | [`01_hello_world.exs`](01_hello_world.exs) | `render_string/3`, `compile/2` + `render/3`, bang variants |
 | [`02_control_flow.exs`](02_control_flow.exs) | `{% if %}`/`{% elsif %}`/`{% else %}`, Liquid truthiness, `{% for %}` with `forloop`, `{% assign %}` |
 | [`03_filters.exs`](03_filters.exs) | Built-in filters, chaining |
-| [`04_custom_filter.exs`](04_custom_filter.exs) | Implementing `Alembic.Filter` and registering it via config |
+| [`04_custom_filter.exs`](04_custom_filter.exs) | Implementing `Alembic.Filter`, registering it globally via config, and per call via the `custom_filters:` option |
 | [`05_inheritance/`](05_inheritance/) | `{% extends %}` / `{% block %}`, `{{ block.super }}`, real files on disk |
 | [`06_includes/`](06_includes/) | `{% include %}` with `with`, and implicit scope sharing |
 | [`07_render_file/`](07_render_file/) | `render_file/3`, the compiled-AST cache, `cache: false` |
