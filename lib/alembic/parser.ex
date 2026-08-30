@@ -63,6 +63,90 @@ defmodule Alembic.Parser do
     end
   end
 
+  @doc """
+  Like `parse/1`, but tries to keep going after an error instead of
+  stopping at the first one, so a single call can report every independent
+  problem in a template rather than making the caller fix-and-reparse one
+  error at a time. `{:ok, ast}` only when there are zero errors;
+  `{:error, [reason(), ...]}` otherwise, one entry per error found, in the
+  order encountered.
+
+  Recovery is best-effort, not a guarantee of precise error isolation: on
+  an error, it skips forward until the next `{% tag %}` or `{{ output }}`
+  token (or end of input) and resumes from there. A single malformed
+  construct — e.g. an `{% if %}` with a genuinely broken tag nested inside
+  it — can therefore surface as more than one reported error: the real one,
+  plus a spurious one from resuming mid-construct. Treat the result as "at
+  least these problems exist," not as N precisely-located, independent
+  errors. `parse/1` remains the right choice whenever only the first error
+  matters (that's still every existing caller of this module).
+
+  ## Examples
+
+      iex> {:ok, tokens} = Alembic.Lexer.tokenize("{% if x %}hi{% endif %}")
+      iex> Alembic.Parser.parse_all(tokens)
+      {:ok, [{:if, {:variable, ["x"]}, [{:text, "hi"}], [], nil}]}
+
+      iex> {:ok, tokens} = Alembic.Lexer.tokenize("{% if x %}a{% endfor %}{{ y ** }}")
+      iex> Alembic.Parser.parse_all(tokens)
+      {:error,
+       [
+         {:missing_end_tag, "endif"},
+         {:invalid_expression, "y **", {:unknown_operator, "**"}}
+       ]}
+  """
+  @spec parse_all([Token.t()]) :: {:ok, AST.t()} | {:error, [reason(), ...]}
+  def parse_all(tokens) when is_list(tokens) do
+    {nodes, node_errors} = tokens |> apply_whitespace_control() |> collect_errors([], [])
+
+    case node_errors ++ extends_position_errors(nodes) do
+      [] -> {:ok, nodes}
+      errors -> {:error, errors}
+    end
+  end
+
+  defp extends_position_errors(nodes) do
+    case validate_extends_position(nodes) do
+      {:ok, _nodes} -> []
+      {:error, reason} -> [reason]
+    end
+  end
+
+  # ---- parse_all/1's error-collecting, best-effort-recovering walk ----
+
+  defp collect_errors([], node_acc, error_acc) do
+    {Enum.reverse(node_acc), Enum.reverse(error_acc)}
+  end
+
+  defp collect_errors([token | rest] = tokens, node_acc, error_acc) do
+    if stopping_token?(token) do
+      error = {:unexpected_token, token, Token.position(token)}
+      collect_errors(rest, node_acc, [error | error_acc])
+    else
+      case parse_node(tokens) do
+        {:ok, node, remaining} -> collect_errors(remaining, [node | node_acc], error_acc)
+        {:error, reason} -> collect_errors(resync(tokens), node_acc, [reason | error_acc])
+      end
+    end
+  end
+
+  defp resync([_failed_token | rest]), do: drop_until_resumable(rest)
+
+  # A `{% tag %}` or `{{ output }}` token could start a fresh, independent
+  # construct — except a "stopping" tag (`else`/`endif`/`endfor`/
+  # `endblock`/`elsif ...`), which is debris from the construct that just
+  # failed, not a new one; skip past those too instead of reporting them
+  # as their own `:unexpected_token` error.
+  defp drop_until_resumable([]), do: []
+
+  defp drop_until_resumable([token | rest]) do
+    if resumable?(token), do: [token | rest], else: drop_until_resumable(rest)
+  end
+
+  defp resumable?({:output, _content, _sl, _sr, _pos}), do: true
+  defp resumable?({:tag, _content, _sl, _sr, _pos} = token), do: not stopping_token?(token)
+  defp resumable?(_other), do: false
+
   # ---- Whitespace control: strip flags trim adjacent :text tokens in place ----
 
   defp apply_whitespace_control(tokens) do

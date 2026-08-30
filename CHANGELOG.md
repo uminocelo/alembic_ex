@@ -5,6 +5,20 @@ All notable changes to this project are documented in this file, following
 
 ## [Unreleased]
 
+### Added
+
+- `Alembic.Parser.parse_all/1` — like `parse/1`, but keeps parsing past an
+  error instead of stopping at the first one, so one call can report every
+  independent problem in a template. Returns `{:ok, ast}` when there are
+  zero errors (identical to `parse/1`), or `{:error, [reason(), ...]}`
+  otherwise. Recovery is best-effort: on an error, it skips forward to the
+  next `{% tag %}` or `{{ output }}` token and resumes from there, so a
+  single badly broken construct can occasionally surface more than one
+  reported error. Added as a new function rather than changing `parse/1`'s
+  return shape, to avoid a breaking change to `Alembic.compile/2` and every
+  existing caller that pattern-matches `parse/1`'s single-`reason`
+  `{:error, reason}` shape.
+
 ### Changed
 
 - `Alembic.Token.t()` now carries a `line`/`col` position on every token

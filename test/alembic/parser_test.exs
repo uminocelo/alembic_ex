@@ -10,6 +10,11 @@ defmodule Alembic.ParserTest do
     Parser.parse(tokens)
   end
 
+  defp parse_all(source) do
+    {:ok, tokens} = Lexer.tokenize(source)
+    Parser.parse_all(tokens)
+  end
+
   describe "text and output nodes" do
     test "plain text" do
       assert {:ok, [{:text, "hello"}]} = parse("hello")
@@ -181,6 +186,52 @@ defmodule Alembic.ParserTest do
     test "invalid expression inside output propagates the expression parser's error" do
       assert {:error, {:invalid_expression, _raw, {:unknown_operator, "**"}}} =
                parse("{{ x ** y }}")
+    end
+  end
+
+  describe "parse_all/1" do
+    test "matches parse/1 exactly when there are no errors" do
+      source = "{% if x %}hi{% endif %}{{ name }}"
+      assert parse_all(source) == parse(source)
+    end
+
+    test "finds two independent errors in a single pass" do
+      assert {:error, errors} = parse_all("{% assign x %}ok{% frobnicate y %}")
+
+      assert errors == [
+               {:malformed_assign, "x"},
+               {:unexpected_tag, "frobnicate y"}
+             ]
+    end
+
+    test "a single stray closing tag is reported the same way parse/1 reports it" do
+      assert {:error, [{:unexpected_token, token, position}]} = parse_all("{% endif %}")
+      assert {:tag, "endif", false, false, _pos} = token
+      assert position == %{line: 1, col: 1}
+    end
+
+    test "does not double-report the debris left behind by a failed construct" do
+      # The missing `{% endif %}` means `{% endfor %}` is leftover debris
+      # from the same broken `if`, not an independent stray-tag error —
+      # only the real problems (missing endif, then the bad expression)
+      # should be reported, not a third {:unexpected_token, ...} for
+      # `endfor` in between.
+      assert {:error, errors} = parse_all("{% if x %}a{% endfor %}{{ y ** }}")
+
+      assert errors == [
+               {:missing_end_tag, "endif"},
+               {:invalid_expression, "y **", {:unknown_operator, "**"}}
+             ]
+    end
+
+    test "extends_not_first combines with an unrelated error found elsewhere" do
+      assert {:error, errors} = parse_all(~s(hi{% extends "x.html" %}{% assign z %}))
+
+      assert errors == [{:malformed_assign, "z"}, :extends_not_first]
+    end
+
+    test "an empty template has no errors" do
+      assert {:ok, []} = parse_all("")
     end
   end
 
