@@ -7,9 +7,12 @@ defmodule Alembic.Parser do
   `docs/grammar.md`. Expression content (inside `{{ }}` and after tag
   keywords) is delegated to `Alembic.Parser.Expression`.
 
-  `Alembic.Token.t()` carries no position metadata (that constraint comes
-  from Milestone 1.1/1.2), so parser errors below cannot include `line`/`col`
-  — only the Lexer's own errors do.
+  `Alembic.Token.t()` carries a `line`/`col` position (see
+  `Alembic.Token.position/1`). `:unexpected_token` is the one error below
+  that names a concrete leftover token, so it's the one that surfaces this
+  position; the other error reasons here (`:malformed_for`,
+  `:invalid_expression`, etc.) operate on already-extracted tag/expression
+  content rather than a token, so they don't carry one.
 
   ## Whitespace control is resolved here, not in the Evaluator
 
@@ -26,7 +29,7 @@ defmodule Alembic.Parser do
   alias Alembic.{AST, Parser.Expression, Token}
 
   @type reason ::
-          {:unexpected_token, Token.t()}
+          {:unexpected_token, Token.t(), Token.position()}
           | {:missing_end_tag, String.t()}
           | :extends_not_first
           | {:unsupported_output_expression, String.t()}
@@ -55,7 +58,7 @@ defmodule Alembic.Parser do
   def parse(tokens) when is_list(tokens) do
     case tokens |> apply_whitespace_control() |> parse_template() do
       {:ok, nodes, []} -> validate_extends_position(nodes)
-      {:ok, _nodes, [token | _rest]} -> {:error, {:unexpected_token, token}}
+      {:ok, _nodes, [token | _rest]} -> {:error, {:unexpected_token, token, Token.position(token)}}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -87,24 +90,24 @@ defmodule Alembic.Parser do
     end)
   end
 
-  defp strip_right?({:output, _content, _sl, true}), do: true
-  defp strip_right?({:tag, _content, _sl, true}), do: true
+  defp strip_right?({:output, _content, _sl, true, _pos}), do: true
+  defp strip_right?({:tag, _content, _sl, true, _pos}), do: true
   defp strip_right?(_token), do: false
 
-  defp strip_left?({:output, _content, true, _sr}), do: true
-  defp strip_left?({:tag, _content, true, _sr}), do: true
+  defp strip_left?({:output, _content, true, _sr, _pos}), do: true
+  defp strip_left?({:tag, _content, true, _sr, _pos}), do: true
   defp strip_left?(_token), do: false
 
   defp trim_text_at(tuple, index, :leading) do
     case elem(tuple, index) do
-      {:text, content} -> put_elem(tuple, index, {:text, String.trim_leading(content)})
+      {:text, content, pos} -> put_elem(tuple, index, {:text, String.trim_leading(content), pos})
       _other -> tuple
     end
   end
 
   defp trim_text_at(tuple, index, :trailing) do
     case elem(tuple, index) do
-      {:text, content} -> put_elem(tuple, index, {:text, String.trim_trailing(content)})
+      {:text, content, pos} -> put_elem(tuple, index, {:text, String.trim_trailing(content), pos})
       _other -> tuple
     end
   end
@@ -125,25 +128,25 @@ defmodule Alembic.Parser do
     end
   end
 
-  defp stopping_token?({:tag, "else", _strip_left, _strip_right}), do: true
-  defp stopping_token?({:tag, "endif", _strip_left, _strip_right}), do: true
-  defp stopping_token?({:tag, "endfor", _strip_left, _strip_right}), do: true
-  defp stopping_token?({:tag, "endblock", _strip_left, _strip_right}), do: true
-  defp stopping_token?({:tag, "elsif " <> _rest, _strip_left, _strip_right}), do: true
+  defp stopping_token?({:tag, "else", _strip_left, _strip_right, _pos}), do: true
+  defp stopping_token?({:tag, "endif", _strip_left, _strip_right, _pos}), do: true
+  defp stopping_token?({:tag, "endfor", _strip_left, _strip_right, _pos}), do: true
+  defp stopping_token?({:tag, "endblock", _strip_left, _strip_right, _pos}), do: true
+  defp stopping_token?({:tag, "elsif " <> _rest, _strip_left, _strip_right, _pos}), do: true
   defp stopping_token?(_token), do: false
 
   # ---- Single node dispatch ----
 
-  defp parse_node([{:text, content} | rest]), do: {:ok, {:text, content}, rest}
+  defp parse_node([{:text, content, _pos} | rest]), do: {:ok, {:text, content}, rest}
 
-  defp parse_node([{:output, raw, _strip_left, _strip_right} | rest]) do
+  defp parse_node([{:output, raw, _strip_left, _strip_right, _pos} | rest]) do
     case Expression.parse(raw) do
       {:ok, expr} -> output_node_from_expr(expr, raw, rest)
       {:error, reason} -> {:error, {:invalid_expression, raw, reason}}
     end
   end
 
-  defp parse_node([{:tag, content, _strip_left, _strip_right} | rest]) do
+  defp parse_node([{:tag, content, _strip_left, _strip_right, _pos} | rest]) do
     dispatch_tag(content, rest)
   end
 
@@ -181,7 +184,7 @@ defmodule Alembic.Parser do
 
   defp parse_elsifs(tokens), do: parse_elsifs(tokens, [])
 
-  defp parse_elsifs([{:tag, "elsif " <> condition_raw, _sl, _sr} | rest], acc) do
+  defp parse_elsifs([{:tag, "elsif " <> condition_raw, _sl, _sr, _pos} | rest], acc) do
     with {:ok, condition} <- Expression.parse(condition_raw),
          {:ok, branch, rest2} <- parse_template(rest) do
       parse_elsifs(rest2, [{condition, branch} | acc])
@@ -190,7 +193,7 @@ defmodule Alembic.Parser do
 
   defp parse_elsifs(tokens, acc), do: {:ok, Enum.reverse(acc), tokens}
 
-  defp parse_optional_else([{:tag, "else", _sl, _sr} | rest]), do: parse_template(rest)
+  defp parse_optional_else([{:tag, "else", _sl, _sr, _pos} | rest]), do: parse_template(rest)
   defp parse_optional_else(tokens), do: {:ok, nil, tokens}
 
   # ---- For var in iterable / else? / endfor ----
@@ -320,7 +323,7 @@ defmodule Alembic.Parser do
 
   # ---- Shared helpers ----
 
-  defp expect_tag([{:tag, content, _sl, _sr} | rest], name) do
+  defp expect_tag([{:tag, content, _sl, _sr, _pos} | rest], name) do
     if content == name, do: {:ok, rest}, else: {:error, {:missing_end_tag, name}}
   end
 

@@ -129,6 +129,31 @@ defmodule AlembicTest do
     end
   end
 
+  describe "custom_filters option (per-call)" do
+    defmodule Shout do
+      @behaviour Alembic.Filter
+
+      @impl true
+      def name, do: "shout"
+
+      @impl true
+      # credo:disable-for-next-line Credo.Check.Refactor.Apply
+      def apply(value, []), do: {:ok, String.upcase(value) <> "!"}
+    end
+
+    test "a per-call custom filter is usable without any global config" do
+      assert {:ok, "WORLD!"} =
+               Alembic.render_string("{{ name | shout }}", %{"name" => "world"},
+                 custom_filters: [Shout]
+               )
+    end
+
+    test "without the per-call option, that filter is unknown" do
+      assert {:error, {:evaluator, {:unknown_filter, "shout"}}} =
+               Alembic.render_string("{{ name | shout }}", %{"name" => "world"})
+    end
+  end
+
   describe "Alembic.CompileError and Alembic.RenderError (available, not raised by the bang API)" do
     test "CompileError formats a message including the reason and a template excerpt" do
       error = %Alembic.CompileError{reason: {:lexer, :some_reason}, template: "{{ broken"}

@@ -115,6 +115,36 @@ defmodule Alembic.CacheTest do
     end
   end
 
+  describe "supervisor restart" do
+    test "restarting the GenServer recreates the ETS table with a clean cache", %{path: path} do
+      original_pid = Process.whereis(Cache)
+      ref = Process.monitor(original_pid)
+
+      Cache.put(path, [{:text, "before crash"}])
+      wait_for_cast()
+      assert {:hit, _ast} = Cache.get(path)
+
+      Process.exit(original_pid, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^original_pid, :killed}
+
+      wait_for_cache_restart()
+
+      restarted_pid = Process.whereis(Cache)
+      assert is_pid(restarted_pid)
+      assert restarted_pid != original_pid
+
+      # The old ETS table died with the old process — a fresh, empty one
+      # was created by the new process's init/1, so the pre-crash entry
+      # is gone even though the file on disk (and its mtime) is unchanged.
+      assert :miss = Cache.get(path)
+
+      # The restarted GenServer is fully functional.
+      Cache.put(path, [{:text, "after restart"}])
+      wait_for_cast()
+      assert {:hit, [{:text, "after restart"}]} = Cache.get(path)
+    end
+  end
+
   describe "concurrent reads" do
     test "many concurrent readers all succeed without going through the GenServer", %{path: path} do
       ast = [{:text, "concurrent"}]
@@ -136,4 +166,21 @@ defmodule Alembic.CacheTest do
   # guarantee prior casts have been processed — so waiting for a call's
   # reply guarantees every earlier cast from this process was handled first.
   defp wait_for_cast, do: Alembic.Cache.sweep()
+
+  # The supervisor's restarted child re-registers its name before init/1
+  # (which creates the ETS table) has necessarily finished, so polling
+  # Process.whereis/1 alone could observe a live pid backed by no table
+  # yet. A synchronous call is only handled once init/1 has returned, so
+  # retrying `sweep/0` until it succeeds guarantees the table exists.
+  defp wait_for_cache_restart(attempts \\ 50)
+
+  defp wait_for_cache_restart(0), do: flunk("Alembic.Cache did not restart in time")
+
+  defp wait_for_cache_restart(attempts) do
+    Alembic.Cache.sweep()
+  catch
+    :exit, _reason ->
+      Process.sleep(10)
+      wait_for_cache_restart(attempts - 1)
+  end
 end

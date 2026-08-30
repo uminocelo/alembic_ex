@@ -17,15 +17,15 @@ defmodule Alembic.LexerGenerators do
     |> IO.iodata_to_binary()
   end
 
-  defp reconstruct_token({:text, content}), do: content
+  defp reconstruct_token({:text, content, _pos}), do: content
 
-  defp reconstruct_token({:output, content, strip_left, strip_right}) do
+  defp reconstruct_token({:output, content, strip_left, strip_right, _pos}) do
     open = if strip_left, do: "{{-", else: "{{"
     close = if strip_right, do: "-}}", else: "}}"
     open <> " " <> content <> " " <> close
   end
 
-  defp reconstruct_token({:tag, content, strip_left, strip_right}) do
+  defp reconstruct_token({:tag, content, strip_left, strip_right, _pos}) do
     open = if strip_left, do: "{%-", else: "{%"
     close = if strip_right, do: "-%}", else: "%}"
     open <> " " <> content <> " " <> close

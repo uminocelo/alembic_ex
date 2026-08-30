@@ -163,8 +163,15 @@ defmodule Alembic.ParserTest do
 
   describe "errors" do
     test "unexpected trailing token" do
-      assert {:error, {:unexpected_token, {:tag, "endif", false, false}}} =
+      assert {:error, {:unexpected_token, {:tag, "endif", false, false, _tok_pos}, _err_pos}} =
                parse("{% endif %}")
+    end
+
+    test "unexpected trailing token error carries the token's line/col" do
+      assert {:error, {:unexpected_token, _token, position}} =
+               parse("line one\nline two {% endif %}")
+
+      assert position == %{line: 2, col: 10}
     end
 
     test "unknown tag keyword" do

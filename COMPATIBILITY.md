@@ -51,8 +51,8 @@ hand-written in `test/integration/liquid_compat_test.exs`.
 | `ceil` / `floor` | return integers | return integers | Matches Liquid; Elixir's own `Float.ceil/1` returns a float, so this required an explicit `trunc/1` |
 | `date` filter | Elixir `Calendar.strftime/2` format strings | Ruby `strftime` format strings | No Ruby-compatible formatter available without a dependency; the two format-string dialects are similar but not identical |
 | Output tag base expression | must be a bare variable path (optionally filtered) | any expression, including literals | `Alembic.AST.output_node`'s type (`{:output, path(), [filter()]}`) was fixed in Milestone 1.1, before the parser existed; `{{ "literal" \| filter }}` returns `{:error, {:unsupported_output_expression, _}}` |
-| Per-call `:custom_filters` option | not implemented (global `config :alembic, custom_filters: [...]` only) | n/a (Liquid has no per-call filter registration concept) | Documented gap — would require threading opts through `Evaluator`/`Filters`; not implemented in Milestone 1.5 |
 | Cache hit/miss telemetry | `Logger.debug/1` | n/a | `:telemetry` is a separate Hex package; issue 1.1.1's zero-runtime-deps policy (ex_doc only) rules it out |
+| `slice` filter | strings only | strings and arrays | `Alembic.Filters`' `slice` clauses always run the input through `coerce_to_string/1`; array slicing was never implemented |
 
 ## Unsupported features (out of MVP scope)
 
@@ -72,8 +72,10 @@ hand-written in `test/integration/liquid_compat_test.exs`.
 ## Extension features (Alembic adds beyond Liquid)
 
 - `base64_encode` / `base64_decode` filters
-- `Alembic.Filter` behaviour for registering custom filters via
-  `config :alembic, custom_filters: [MyApp.Filters.Money]`
+- `Alembic.Filter` behaviour for registering custom filters, globally via
+  `config :alembic, custom_filters: [MyApp.Filters.Money]` or per call via
+  `render/3`'s `custom_filters:` option (the latter takes precedence on a
+  name collision)
 - `strict: true` render option — errors on any undefined variable instead of
   silently rendering `""`, useful for catching typos during development
 - ETS-backed compiled-template cache with mtime-based invalidation,

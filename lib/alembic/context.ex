@@ -9,14 +9,15 @@ defmodule Alembic.Context do
   """
 
   @enforce_keys [:scopes]
-  defstruct scopes: [], assigns: %{}, strict: false, loader_fn: nil
+  defstruct scopes: [], assigns: %{}, strict: false, loader_fn: nil, custom_filters: []
 
   @type loader_fn :: (String.t() -> {:ok, String.t()} | {:error, term()})
   @type t :: %__MODULE__{
           scopes: [map()],
           assigns: map(),
           strict: boolean(),
-          loader_fn: loader_fn() | nil
+          loader_fn: loader_fn() | nil,
+          custom_filters: [module()]
         }
 
   @doc """
@@ -67,6 +68,22 @@ defmodule Alembic.Context do
   @spec loader(t(), loader_fn()) :: t()
   def loader(%__MODULE__{} = ctx, loader_fn) when is_function(loader_fn, 1),
     do: %{ctx | loader_fn: loader_fn}
+
+  @doc """
+  Sets per-call custom filter modules, layered on top of (and taking
+  precedence over, on a name collision) whatever is registered globally via
+  `config :alembic, custom_filters: [...]`. Used by `Alembic.render/3`'s
+  `:custom_filters` option — see `Alembic.Filters.apply/4`.
+
+  ## Examples
+
+      iex> ctx = Alembic.Context.new(%{}) |> Alembic.Context.custom_filters([MyFilter])
+      iex> ctx.custom_filters
+      [MyFilter]
+  """
+  @spec custom_filters(t(), [module()]) :: t()
+  def custom_filters(%__MODULE__{} = ctx, modules) when is_list(modules),
+    do: %{ctx | custom_filters: modules}
 
   @doc """
   Pushes a new innermost scope (entering a `{% for %}` body or an

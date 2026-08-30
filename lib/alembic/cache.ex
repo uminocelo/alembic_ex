@@ -27,6 +27,13 @@ defmodule Alembic.Cache do
   two milestones earlier. `Logger.debug/1` calls with the same
   `path`/hit-or-miss information stand in for the telemetry events instead
   — observable, but without the extra dependency.
+
+  Each call passes a zero-arity function (`Logger.debug(fn -> ... end)`),
+  not a plain string, so the `"Alembic.Cache hit: \#{path}"` interpolation
+  only runs when the configured Logger level would actually emit it.
+  `do_get/1` is the hottest path in the module — this matters there more
+  than the write paths below, which are already off the direct read path
+  entirely.
   """
 
   use GenServer
@@ -191,18 +198,19 @@ defmodule Alembic.Cache do
 
   defp do_get(path) do
     case current_mtime(path) do
-      {:ok, mtime} ->
-        case :ets.lookup(@table, {path, mtime}) do
-          [{_key, ast}] ->
-            Logger.debug("Alembic.Cache hit: #{path}")
-            {:hit, ast}
+      {:ok, mtime} -> lookup_and_log(path, mtime)
+      :error -> :miss
+    end
+  end
 
-          [] ->
-            Logger.debug("Alembic.Cache miss: #{path}")
-            :miss
-        end
+  defp lookup_and_log(path, mtime) do
+    case :ets.lookup(@table, {path, mtime}) do
+      [{_key, ast}] ->
+        Logger.debug(fn -> "Alembic.Cache hit: #{path}" end)
+        {:hit, ast}
 
-      :error ->
+      [] ->
+        Logger.debug(fn -> "Alembic.Cache miss: #{path}" end)
         :miss
     end
   end

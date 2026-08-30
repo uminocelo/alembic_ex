@@ -10,7 +10,7 @@ defmodule Alembic.Lexer do
     defstruct tokens: [], line: 1, col: 1
   end
 
-  @type position :: %{line: pos_integer(), col: pos_integer()}
+  @type position :: Token.position()
   @type reason ::
           {:unterminated_output, position()}
           | {:unterminated_tag, position()}
@@ -24,7 +24,12 @@ defmodule Alembic.Lexer do
   ## Examples
 
       iex> Alembic.Lexer.tokenize("Hello {{ name }}!")
-      {:ok, [{:text, "Hello "}, {:output, "name", false, false}, {:text, "!"}]}
+      {:ok,
+       [
+         {:text, "Hello ", %{line: 1, col: 1}},
+         {:output, "name", false, false, %{line: 1, col: 7}},
+         {:text, "!", %{line: 1, col: 17}}
+       ]}
 
       iex> Alembic.Lexer.tokenize("{{ name")
       {:error, {:unterminated_output, %{line: 1, col: 1}}}
@@ -57,9 +62,11 @@ defmodule Alembic.Lexer do
   end
 
   defp do_tokenize(<<char::utf8, rest::binary>>, state) do
+    pos = position(state)
+
     state =
       state
-      |> push({:text, <<char::utf8>>})
+      |> push({:text, <<char::utf8>>, pos})
       |> advance_char(<<char::utf8>>)
 
     do_tokenize(rest, state)
@@ -73,7 +80,10 @@ defmodule Alembic.Lexer do
         if content == "" do
           {:error, {:empty_output_tag, start_pos}}
         else
-          do_tokenize(remaining, push(state, {:output, content, strip_left, strip_right}))
+          do_tokenize(
+            remaining,
+            push(state, {:output, content, strip_left, strip_right, start_pos})
+          )
         end
 
       :error ->
@@ -100,15 +110,22 @@ defmodule Alembic.Lexer do
   end
 
   defp dispatch_tag("raw", _strip_left, _strip_right, remaining, state, start_pos) do
+    raw_start_pos = position(state)
+
     case scan_until_end_tag(remaining, "endraw", state) do
-      {:ok, "", remaining, state} -> do_tokenize(remaining, state)
-      {:ok, raw_text, remaining, state} -> do_tokenize(remaining, push(state, {:text, raw_text}))
-      :error -> {:error, {:unterminated_raw, start_pos}}
+      {:ok, "", remaining, state} ->
+        do_tokenize(remaining, state)
+
+      {:ok, raw_text, remaining, state} ->
+        do_tokenize(remaining, push(state, {:text, raw_text, raw_start_pos}))
+
+      :error ->
+        {:error, {:unterminated_raw, start_pos}}
     end
   end
 
-  defp dispatch_tag(content, strip_left, strip_right, remaining, state, _start_pos) do
-    do_tokenize(remaining, push(state, {:tag, content, strip_left, strip_right}))
+  defp dispatch_tag(content, strip_left, strip_right, remaining, state, start_pos) do
+    do_tokenize(remaining, push(state, {:tag, content, strip_left, strip_right, start_pos}))
   end
 
   defp extract_output_until(input, state), do: extract_output_until(input, state, [])
@@ -213,8 +230,8 @@ defmodule Alembic.Lexer do
     Enum.reverse(acc)
   end
 
-  defp do_coalesce_text([{:text, current} | rest], [{:text, previous} | acc]) do
-    do_coalesce_text(rest, [{:text, previous <> current} | acc])
+  defp do_coalesce_text([{:text, current, _pos} | rest], [{:text, previous, first_pos} | acc]) do
+    do_coalesce_text(rest, [{:text, previous <> current, first_pos} | acc])
   end
 
   defp do_coalesce_text([token | rest], acc) do

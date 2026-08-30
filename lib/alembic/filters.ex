@@ -16,6 +16,56 @@ defmodule Alembic.Filters do
   `join` with no argument defaults to `""` (empty separator) per issue
   1.4.3's explicit instruction, not Liquid's own default of `" "` — flagged
   here since it is a real behavioral divergence from upstream Liquid.
+
+  ## Type coercion reference
+
+  Every filter clause below is a private `apply_builtin/3` head, so none of
+  them can carry their own `@doc` (the compiler warns — `@doc` has no effect
+  on a private function). This table is the substitute: it's the single
+  place documenting what each filter does when handed a value of the
+  "wrong" type, instead of that behavior being scattered implicitly across
+  56 private function clauses.
+
+  ### Coerces to a string (`coerce_to_string/1`)
+
+  `upcase`, `downcase`, `capitalize`, `strip`, `lstrip`, `rstrip`,
+  `strip_newlines`, `prepend`, `append`, `replace`, `replace_first`,
+  `remove`, `remove_first`, `split`, `truncate`, `truncatewords`,
+  `newline_to_br`, `escape`, `escape_once`, `strip_html`, `url_encode`,
+  `url_decode`, `base64_encode`, `base64_decode`, `sort_natural` (for
+  comparison only — the original items are returned), `join`'s separator
+  argument (not its items). `nil` coerces to `""`; numbers and booleans
+  coerce via `Integer.to_string/1` / `Float.to_string/1` / `to_string/1`;
+  anything else falls back to `inspect/1` rather than raising.
+
+  `slice` also coerces its input via `coerce_to_string/1` — unlike upstream
+  Liquid, it does not support slicing arrays, only strings (see
+  `COMPATIBILITY.md`).
+
+  ### Coerces to a number (`coerce_to_number/1`)
+
+  `abs`, `ceil`, `floor`, `round`, `plus`, `minus`, `times`, `divided_by`,
+  `modulo`, `at_least`, `at_most`. `nil` coerces to `0`, `true`/`false` to
+  `1`/`0`, and a numeric string parses to an integer or float; a
+  non-numeric string or any other type coerces to `0` rather than raising.
+
+  ### No coercion — requires an exact type
+
+  - `size` — matches only on `is_binary`/`is_list` guards; any other input
+    falls through to the catch-all clause and returns
+    `{:error, {:invalid_filter_args, "size", args}}`, not a crash.
+  - `first`, `last`, `reverse`, `sort`, `uniq`, `compact`, `map`, `where`,
+    `concat`, `push`, `pop`, `unshift`, `shift`, `flatten` — all expect a
+    list; a non-list input raises (`FunctionClauseError` or
+    `Protocol.UndefinedError`), the same as calling the underlying
+    `List`/`Enum` function directly with that value.
+  - `date` — accepts a `Date`/`DateTime`/`NaiveDateTime` struct or an ISO
+    8601 string; anything else returns `{:error, {:invalid_date, value}}`,
+    not a crash.
+  - `default` — no coercion; blankness is an exact-value check against
+    `nil`, `false`, `""`, and `[]` (see `blank?/1`), not a truthiness rule.
+  - `inspect` — accepts any term as-is via `Kernel.inspect/1`; there is
+    nothing to coerce.
   """
 
   @type reason ::
@@ -25,9 +75,13 @@ defmodule Alembic.Filters do
           | {:invalid_date, any()}
 
   @doc """
-  Applies a single named filter. Checks `config :alembic, :custom_filters`
-  first (matched by `c:Alembic.Filter.name/0`), then falls back to the
-  built-in catalog.
+  Applies a single named filter. Checks `custom_filters` first (matched by
+  `c:Alembic.Filter.name/0`), then falls back to the built-in catalog.
+
+  `custom_filters` defaults to `[]`; pass modules here for a per-call
+  override (`Alembic.render/3`'s `:custom_filters` option) — they're tried
+  before `config :alembic, :custom_filters` and take precedence on a name
+  collision.
 
   ## Examples
 
@@ -40,9 +94,9 @@ defmodule Alembic.Filters do
       iex> Alembic.Filters.apply("nope", "x", [])
       {:error, {:unknown_filter, "nope"}}
   """
-  @spec apply(String.t(), any(), [any()]) :: {:ok, any()} | {:error, reason()}
-  def apply(name, value, args) do
-    case custom_filter_module(name) do
+  @spec apply(String.t(), any(), [any()], [module()]) :: {:ok, any()} | {:error, reason()}
+  def apply(name, value, args, custom_filters \\ []) do
+    case custom_filter_module(name, custom_filters) do
       {:ok, module} -> module.apply(value, args)
       :not_found -> apply_builtin(name, value, args)
     end
@@ -50,7 +104,9 @@ defmodule Alembic.Filters do
 
   @doc """
   Applies a full filter chain in order, the output of each filter feeding
-  the next. Short-circuits on the first error.
+  the next. Short-circuits on the first error. `ctx.custom_filters` (set
+  via `Alembic.Context.custom_filters/2`) is consulted for every filter in
+  the chain, ahead of the global `config :alembic, :custom_filters` list.
 
   ## Examples
 
@@ -60,20 +116,24 @@ defmodule Alembic.Filters do
       iex> Alembic.Filters.apply_chain("hello", [], nil)
       {:ok, "hello"}
   """
-  @spec apply_chain(any(), [{String.t(), [any()]}], Alembic.Context.t()) ::
+  @spec apply_chain(any(), [{String.t(), [any()]}], Alembic.Context.t() | nil) ::
           {:ok, any()} | {:error, reason()}
-  def apply_chain(value, filters, _ctx) do
+  def apply_chain(value, filters, ctx) do
+    custom_filters = context_custom_filters(ctx)
+
     Enum.reduce_while(filters, {:ok, value}, fn {name, args}, {:ok, acc} ->
-      case __MODULE__.apply(name, acc, args) do
+      case __MODULE__.apply(name, acc, args, custom_filters) do
         {:ok, result} -> {:cont, {:ok, result}}
         {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
   end
 
-  defp custom_filter_module(name) do
-    :alembic
-    |> Application.get_env(:custom_filters, [])
+  defp context_custom_filters(%Alembic.Context{custom_filters: modules}), do: modules
+  defp context_custom_filters(_other), do: []
+
+  defp custom_filter_module(name, custom_filters) do
+    (custom_filters ++ Application.get_env(:alembic, :custom_filters, []))
     |> Enum.find(fn module -> module.name() == name end)
     |> case do
       nil -> :not_found

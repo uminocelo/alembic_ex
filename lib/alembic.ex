@@ -43,10 +43,13 @@ defmodule Alembic do
   | `:extensions` | `[String.t()]` | `[".html", ".liquid"]` | File extensions tried when a name has none |
   | `:cache` | `boolean()` | `true` | Enable/disable the compiled-AST cache for this call |
   | `:strict` | `boolean()` | `false` | Error on undefined variables instead of rendering `""` |
+  | `:custom_filters` | `[module()]` | `[]` | Additional filter modules for this call only (see below) |
 
-  Custom filters are registered globally via
-  `config :alembic, custom_filters: [MyApp.Filters.Money]` (see
-  `Alembic.Filter`) — there is currently no per-call override for that one.
+  Custom filters can be registered globally via
+  `config :alembic, custom_filters: [MyApp.Filters.Money]`, per call via the
+  `:custom_filters` option above, or both — per-call modules are tried
+  first and take precedence over globally-registered ones on a name
+  collision. See `Alembic.Filter`.
 
   ## Errors
 
@@ -110,6 +113,10 @@ defmodule Alembic do
       iex> {:ok, ast} = Alembic.compile("{{ missing }}")
       iex> Alembic.render(ast, %{}, strict: true)
       {:error, {:evaluator, {:undefined_variable, ["missing"]}}}
+
+      iex> {:ok, ast} = Alembic.compile("{{ name | shout }}")
+      iex> Alembic.render(ast, %{"name" => "world"}, custom_filters: [Alembic.DocTest.Shout])
+      {:ok, "WORLD!"}
   """
   @spec render(AST.t(), map(), keyword()) :: {:ok, String.t()} | {:error, render_error()}
   def render(ast, assigns \\ %{}, opts \\ []) when is_list(ast) and is_map(assigns) do
@@ -213,12 +220,14 @@ defmodule Alembic do
 
   defp evaluator_step(ast, assigns, opts) do
     strict? = Keyword.get(opts, :strict, false)
+    custom_filters = Keyword.get(opts, :custom_filters, [])
 
     ctx =
       assigns
       |> Context.new()
       |> Context.strict(strict?)
       |> Context.loader(Loader.build_loader(opts))
+      |> Context.custom_filters(custom_filters)
 
     case Evaluator.eval(ast, ctx) do
       {:ok, html} -> {:ok, html}

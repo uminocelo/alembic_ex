@@ -74,6 +74,13 @@ defmodule Alembic.Integration.LiquidCompatTest do
       template = "{% for x in xs %}{% assign last = x %}{% endfor %}{{ last }}"
       assert {:ok, "c"} = render(template, %{"xs" => ["a", "b", "c"]})
     end
+
+    test "made inside an include is visible after it, in the including template" do
+      template = ~s({% include "includes/set_flag.html" %}{{ flag }})
+
+      assert {:ok, "set-in-partial"} =
+               Alembic.render_string(template, %{}, roots: ["test/fixtures/templates"])
+    end
   end
 
   describe "filters" do

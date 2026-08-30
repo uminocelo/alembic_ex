@@ -3,6 +3,44 @@
 All notable changes to this project are documented in this file, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- `Alembic.Token.t()` now carries a `line`/`col` position on every token
+  (`Alembic.Token.position/1` extracts it from any shape). `Alembic.Parser`'s
+  `{:unexpected_token, ...}` error surfaces it as `{:unexpected_token, token,
+  %{line:, col:}}`. Also fixed a `.formatter.exs` typo (`line_lenght` →
+  `line_length`) that had silently disabled the 100-column format setting.
+- `Alembic.Filters`' `@moduledoc` now documents type-coercion behavior for
+  every built-in filter (a "Type coercion reference" section, since the
+  individual filter clauses are private and can't carry their own `@doc`).
+  This surfaced a real, previously undocumented deviation from upstream
+  Liquid — `slice` only ever operates on strings, not arrays — now recorded
+  in `COMPATIBILITY.md`. `test/alembic/filters_test.exs` also gained a
+  second test case (happy path + edge case) for every filter that only had
+  one.
+- `:custom_filters` is now a real per-call option on `Alembic.render/3` (and
+  `render_string/3`/`render_file/3`), not just global `config :alembic,
+  custom_filters: [...]` — per-call modules take precedence on a name
+  collision. `Alembic.Context` gained a `custom_filters` field
+  (`Context.custom_filters/2`) and `Alembic.Filters.apply/4` accepts a
+  per-call module list.
+- `Alembic.Cache` gained a supervisor-restart test confirming the ETS table
+  comes back empty (not just alive) after the `one_for_one` supervisor
+  restarts a crashed `Alembic.Cache` process. Its `Logger.debug/1` calls now
+  use the lazy `fn -> ... end` form so the log message is only built when
+  it will actually be emitted.
+- `{% assign %}` visibility across an `{% include %}` boundary now has a
+  dedicated integration test.
+- `BENCHMARKS.md` numbers refreshed; the pipeline benchmark fixture gained
+  5 `{% include %}` tags it was missing (it had none), which surfaced a
+  real finding: `Alembic.Evaluator`'s internal include-compilation step
+  recompiles every include on every render, uncached, regardless of the
+  outer template's cache status — documented in the "Cache: hit vs miss"
+  section rather than fixed (caching partials is a feature change, out of
+  scope here).
+
 ## [0.1.0] - 2026-08-29
 
 ### Added
