@@ -17,7 +17,7 @@ defmodule AlembicTest do
     end
 
     test "compile surfaces a parser error" do
-      assert {:error, {:parser, {:missing_end_tag, "endif"}}} =
+      assert {:error, {:parser, {:missing_end_tag, "endif", %{line: 1, col: 1}}}} =
                Alembic.compile("{% if x %}no close")
     end
   end

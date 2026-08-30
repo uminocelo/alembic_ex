@@ -8,11 +8,15 @@ defmodule Alembic.Parser do
   keywords) is delegated to `Alembic.Parser.Expression`.
 
   `Alembic.Token.t()` carries a `line`/`col` position (see
-  `Alembic.Token.position/1`). `:unexpected_token` is the one error below
-  that names a concrete leftover token, so it's the one that surfaces this
-  position; the other error reasons here (`:malformed_for`,
+  `Alembic.Token.position/1`). Two error reasons below surface one:
+  `:unexpected_token` names a concrete leftover token, so it uses that
+  token's own position; `:missing_end_tag` uses the position of the
+  *opening* tag that's missing its close (e.g. the `{% if %}` itself), not
+  a closing-tag position, since there's often no closing tag at all to
+  point at — running out of input entirely is the common case, not finding
+  the wrong one. The remaining error reasons here (`:malformed_for`,
   `:invalid_expression`, etc.) operate on already-extracted tag/expression
-  content rather than a token, so they don't carry one.
+  content rather than a token, so they don't carry a position.
 
   ## Whitespace control is resolved here, not in the Evaluator
 
@@ -30,7 +34,7 @@ defmodule Alembic.Parser do
 
   @type reason ::
           {:unexpected_token, Token.t(), Token.position()}
-          | {:missing_end_tag, String.t()}
+          | {:missing_end_tag, String.t(), Token.position()}
           | :extends_not_first
           | {:unsupported_output_expression, String.t()}
           | {:invalid_expression, String.t(), Expression.reason()}
@@ -52,7 +56,7 @@ defmodule Alembic.Parser do
 
       iex> {:ok, tokens} = Alembic.Lexer.tokenize("{% if x %}no close")
       iex> Alembic.Parser.parse(tokens)
-      {:error, {:missing_end_tag, "endif"}}
+      {:error, {:missing_end_tag, "endif", %{line: 1, col: 1}}}
   """
   @spec parse([Token.t()]) :: {:ok, AST.t()} | {:error, reason()}
   def parse(tokens) when is_list(tokens) do
@@ -91,7 +95,7 @@ defmodule Alembic.Parser do
       iex> Alembic.Parser.parse_all(tokens)
       {:error,
        [
-         {:missing_end_tag, "endif"},
+         {:missing_end_tag, "endif", %{line: 1, col: 1}},
          {:invalid_expression, "y **", {:unknown_operator, "**"}}
        ]}
   """
@@ -230,8 +234,8 @@ defmodule Alembic.Parser do
     end
   end
 
-  defp parse_node([{:tag, content, _strip_left, _strip_right, _pos} | rest]) do
-    dispatch_tag(content, rest)
+  defp parse_node([{:tag, content, _strip_left, _strip_right, pos} | rest]) do
+    dispatch_tag(content, rest, pos)
   end
 
   defp output_node_from_expr({:variable, path}, _raw, rest), do: {:ok, {:output, path, []}, rest}
@@ -246,22 +250,22 @@ defmodule Alembic.Parser do
 
   # ---- Tag keyword dispatch (tag content is already trimmed by the Lexer) ----
 
-  defp dispatch_tag("if " <> condition_raw, rest), do: parse_if(condition_raw, rest)
-  defp dispatch_tag("for " <> spec, rest), do: parse_for(spec, rest)
-  defp dispatch_tag("assign " <> spec, rest), do: parse_assign(spec, rest)
-  defp dispatch_tag("extends " <> raw, rest), do: parse_extends(raw, rest)
-  defp dispatch_tag("block " <> name, rest), do: parse_block(String.trim(name), rest)
-  defp dispatch_tag("include " <> raw, rest), do: parse_include(raw, rest)
-  defp dispatch_tag(other, _rest), do: {:error, {:unexpected_tag, other}}
+  defp dispatch_tag("if " <> condition_raw, rest, pos), do: parse_if(condition_raw, rest, pos)
+  defp dispatch_tag("for " <> spec, rest, pos), do: parse_for(spec, rest, pos)
+  defp dispatch_tag("assign " <> spec, rest, _pos), do: parse_assign(spec, rest)
+  defp dispatch_tag("extends " <> raw, rest, _pos), do: parse_extends(raw, rest)
+  defp dispatch_tag("block " <> name, rest, pos), do: parse_block(String.trim(name), rest, pos)
+  defp dispatch_tag("include " <> raw, rest, _pos), do: parse_include(raw, rest)
+  defp dispatch_tag(other, _rest, _pos), do: {:error, {:unexpected_tag, other}}
 
   # ---- If / elsif* / else? / endif ----
 
-  defp parse_if(condition_raw, tokens) do
+  defp parse_if(condition_raw, tokens, pos) do
     with {:ok, condition} <- Expression.parse(condition_raw),
          {:ok, then_branch, rest} <- parse_template(tokens),
          {:ok, elsif_branches, rest2} <- parse_elsifs(rest),
          {:ok, else_branch, rest3} <- parse_optional_else(rest2),
-         {:ok, rest4} <- expect_tag(rest3, "endif") do
+         {:ok, rest4} <- expect_tag(rest3, "endif", pos) do
       {:ok, {:if, condition, then_branch, elsif_branches, else_branch}, rest4}
     end
   end
@@ -282,12 +286,12 @@ defmodule Alembic.Parser do
 
   # ---- For var in iterable / else? / endfor ----
 
-  defp parse_for(spec, tokens) do
+  defp parse_for(spec, tokens, pos) do
     with {:ok, var_name, iterable_raw} <- split_for_spec(spec),
          {:ok, iterable} <- Expression.parse(iterable_raw),
          {:ok, body, rest} <- parse_template(tokens),
          {:ok, else_branch, rest2} <- parse_optional_else(rest),
-         {:ok, rest3} <- expect_tag(rest2, "endfor") do
+         {:ok, rest3} <- expect_tag(rest2, "endfor", pos) do
       {:ok, {:for, var_name, iterable, body, else_branch}, rest3}
     end
   end
@@ -324,9 +328,9 @@ defmodule Alembic.Parser do
     end
   end
 
-  defp parse_block(name, tokens) do
+  defp parse_block(name, tokens, pos) do
     with {:ok, body, rest} <- parse_template(tokens),
-         {:ok, rest2} <- expect_tag(rest, "endblock") do
+         {:ok, rest2} <- expect_tag(rest, "endblock", pos) do
       {:ok, {:block, name, body}, rest2}
     end
   end
@@ -407,11 +411,11 @@ defmodule Alembic.Parser do
 
   # ---- Shared helpers ----
 
-  defp expect_tag([{:tag, content, _sl, _sr, _pos} | rest], name) do
-    if content == name, do: {:ok, rest}, else: {:error, {:missing_end_tag, name}}
+  defp expect_tag([{:tag, content, _sl, _sr, _pos} | rest], name, open_pos) do
+    if content == name, do: {:ok, rest}, else: {:error, {:missing_end_tag, name, open_pos}}
   end
 
-  defp expect_tag(_tokens, name), do: {:error, {:missing_end_tag, name}}
+  defp expect_tag(_tokens, name, open_pos), do: {:error, {:missing_end_tag, name, open_pos}}
 
   defp validate_extends_position(nodes) do
     case Enum.find_index(nodes, &match?({:extends, _template_name}, &1)) do

@@ -11,7 +11,10 @@ IO.inspect(Alembic.render_string("Hello {{ name"))
 
 IO.puts("\n--- Parser error (missing endif) ---")
 IO.inspect(Alembic.render_string("{% if user.admin %}admin only"))
-# => {:error, {:parser, {:missing_end_tag, "endif"}}}
+# => {:error, {:parser, {:missing_end_tag, "endif", %{line: 1, col: 1}}}}
+# The position points at the {% if %} that's missing its close, not at
+# end-of-input — that's the only useful place to point when the closing
+# tag simply doesn't exist anywhere in the template.
 
 IO.puts("\n--- Loader error (file not found) ---")
 IO.inspect(Alembic.render_file("does_not_exist.html", %{}, roots: ["/tmp"]))

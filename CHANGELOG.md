@@ -21,6 +21,13 @@ All notable changes to this project are documented in this file, following
 
 ### Changed
 
+- **Breaking:** `Alembic.Parser`'s `{:missing_end_tag, tag_name}` error is
+  now `{:missing_end_tag, tag_name, position}`, where `position` is the
+  *opening* tag's `line`/`col` (e.g. the `{% if %}` itself), not a
+  closing-tag position — running out of input entirely, with no closing
+  tag anywhere to point at, is the common case. Affects anyone
+  pattern-matching this error's exact shape via `Alembic.compile/2`,
+  `render/3`, `render_string/3`, or `render_file/3`.
 - `Alembic.Token.t()` now carries a `line`/`col` position on every token
   (`Alembic.Token.position/1` extracts it from any shape). `Alembic.Parser`'s
   `{:unexpected_token, ...}` error surfaces it as `{:unexpected_token, token,

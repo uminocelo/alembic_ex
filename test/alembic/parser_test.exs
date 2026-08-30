@@ -81,8 +81,9 @@ defmodule Alembic.ParserTest do
               ]} = parse("{% if x %}a{% elsif y %}b{% elsif z %}c{% else %}d{% endif %}")
     end
 
-    test "missing endif returns a structured error" do
-      assert {:error, {:missing_end_tag, "endif"}} = parse("{% if x %}no closing tag")
+    test "missing endif returns a structured error with the opening tag's position" do
+      assert {:error, {:missing_end_tag, "endif", %{line: 1, col: 1}}} =
+               parse("{% if x %}no closing tag")
     end
   end
 
@@ -97,8 +98,9 @@ defmodule Alembic.ParserTest do
                parse("{% for post in posts %}{{ post }}{% else %}empty{% endfor %}")
     end
 
-    test "missing endfor returns a structured error" do
-      assert {:error, {:missing_end_tag, "endfor"}} = parse("{% for x in xs %}no closing tag")
+    test "missing endfor returns a structured error with the opening tag's position" do
+      assert {:error, {:missing_end_tag, "endfor", %{line: 1, col: 1}}} =
+               parse("{% for x in xs %}no closing tag")
     end
 
     test "malformed for (missing ' in ') returns a structured error" do
@@ -148,8 +150,9 @@ defmodule Alembic.ParserTest do
                parse(~s({% extends "base.html" %}{% block title %}Hi{% endblock %}))
     end
 
-    test "missing endblock returns a structured error" do
-      assert {:error, {:missing_end_tag, "endblock"}} = parse("{% block title %}no closing tag")
+    test "missing endblock returns a structured error with the opening tag's position" do
+      assert {:error, {:missing_end_tag, "endblock", %{line: 1, col: 1}}} =
+               parse("{% block title %}no closing tag")
     end
   end
 
@@ -175,6 +178,13 @@ defmodule Alembic.ParserTest do
     test "unexpected trailing token error carries the token's line/col" do
       assert {:error, {:unexpected_token, _token, position}} =
                parse("line one\nline two {% endif %}")
+
+      assert position == %{line: 2, col: 10}
+    end
+
+    test "missing end tag error carries the position of the opening tag, not the failure point" do
+      assert {:error, {:missing_end_tag, "endif", position}} =
+               parse("line one\nline two {% if x %}no closing tag")
 
       assert position == %{line: 2, col: 10}
     end
@@ -219,7 +229,7 @@ defmodule Alembic.ParserTest do
       assert {:error, errors} = parse_all("{% if x %}a{% endfor %}{{ y ** }}")
 
       assert errors == [
-               {:missing_end_tag, "endif"},
+               {:missing_end_tag, "endif", %{line: 1, col: 1}},
                {:invalid_expression, "y **", {:unknown_operator, "**"}}
              ]
     end

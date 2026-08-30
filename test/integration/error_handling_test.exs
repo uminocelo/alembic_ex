@@ -14,8 +14,8 @@ defmodule Alembic.Integration.ErrorHandlingTest do
              Alembic.render_string("{{ name")
   end
 
-  test "a Parser error (missing endif) surfaces from render_string/3 cleanly" do
-    assert {:error, {:parser, {:missing_end_tag, "endif"}}} =
+  test "a Parser error (missing endif) surfaces from render_string/3 with line/col information" do
+    assert {:error, {:parser, {:missing_end_tag, "endif", %{line: 1, col: 1}}}} =
              Alembic.render_string("{% if x %}no closing tag")
   end
 
