@@ -3,6 +3,16 @@
 All notable changes to this project are documented in this file, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.1] - 2026-09-06
+
+### Changed
+
+- Removed all Grimoire references from `README.md`, `examples/README.md`,
+  `lib/alembic.ex`, and `test/integration/pipeline_test.exs`. Alembic is
+  documented as a standalone library; Grimoire remains a downstream consumer
+  but is no longer mentioned in the package itself.
+- Added `AGENTS.md` to guide AI agents working in this repository.
+
 ## [0.1.0] - 2026-08-29
 
 ### Added
