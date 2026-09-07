@@ -115,38 +115,6 @@ Alembic has **zero runtime dependencies**. Development tooling
 becomes part of the dependency graph of an application that depends on
 Alembic.
 
-## Alembic and Grimoire
-
-Alembic is developed as an independent library, intended as the template
-engine powering [Grimoire](https://github.com/uminocelo/grimoire_ex), a
-static site generator. During local development, Grimoire can reference
-Alembic as a path dependency:
-
-```elixir
-defp deps do
-  [
-    {:alembic, path: "../alembic"}
-  ]
-end
-```
-
-This separation keeps template compilation and rendering independent from
-the static site generator's file discovery, content processing, routing,
-and output generation:
-
-```
-Grimoire
-   │
-   ├── discovers source files
-   ├── loads content and metadata
-   ├── selects templates
-   │
-   └── calls Alembic
-          ├── compile/2
-          ├── render/3
-          └── render_file/3
-```
-
 ## Development
 
 ```bash

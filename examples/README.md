@@ -37,8 +37,7 @@ relying on global config (`config :alembic, template_roots: [...]`).
 
 ## Where to go next
 
-- [`../README.md`](../README.md) — installation, configuration reference,
-  Grimoire integration
+- [`../README.md`](../README.md) — installation, configuration reference
 - [`../docs/grammar.md`](../docs/grammar.md) — the formal template grammar
 - [`../COMPATIBILITY.md`](../COMPATIBILITY.md) — what's supported vs. how
   this deviates from upstream Liquid
