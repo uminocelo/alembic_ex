@@ -31,8 +31,8 @@ defmodule Alembic do
                       │
                       └─ Evaluator.eval(resolved_ast, Context.new(assigns)) → {:ok, html}
 
-  `compile/2` and `render/3` are kept separate so a caller (e.g. Grimoire)
-  can compile once and render many times — the same reason `render_file/3`
+  `compile/2` and `render/3` are kept separate so a caller can
+  compile once and render many times — the same reason `render_file/3`
   bothers with a cache at all.
 
   ## Options

@@ -25,4 +25,15 @@ alembic_template_engine-*.tar
 
 # Plan
 .plan/
+
+# Study notes
 TOSTUDY.md
+
+# Ignore the .idea folder created by JetBrains IDEs (like IntelliJ, RubyMine, PyCharm, etc.).
+.idea/
+
+# Ignore the .vscode folder created by Visual Studio Code.
+.vscode/
+
+# Ignore the .DS_Store file created by macOS.
+.DS_Store

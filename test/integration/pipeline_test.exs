@@ -2,8 +2,7 @@ defmodule Alembic.Integration.PipelineTest do
   @moduledoc """
   End-to-end tests exercising the full pipeline: raw template string or
   file → HTML output, through the real `Alembic` public API — no module is
-  called directly, matching how a caller (e.g. Grimoire) would use this
-  library.
+  called directly, matching how a caller would use this library.
   """
 
   use ExUnit.Case
