@@ -43,6 +43,9 @@ defmodule Alembic.Parser do
           | {:malformed_extends, term()}
           | {:malformed_include, term()}
           | {:unexpected_tag, String.t()}
+          | {:break_outside_loop, Token.position()}
+          | {:continue_outside_loop, Token.position()}
+          | {:malformed_cycle, term()}
 
   @doc """
   Turns a token list (from `Alembic.Lexer.tokenize/1`) into an
@@ -127,7 +130,7 @@ defmodule Alembic.Parser do
       error = {:unexpected_token, token, Token.position(token)}
       collect_errors(rest, node_acc, [error | error_acc])
     else
-      case parse_node(tokens) do
+      case parse_node(tokens, false) do
         {:ok, node, remaining} -> collect_errors(remaining, [node | node_acc], error_acc)
         {:error, reason} -> collect_errors(resync(tokens), node_acc, [reason | error_acc])
       end
@@ -202,16 +205,16 @@ defmodule Alembic.Parser do
 
   # ---- Template: a sequence of nodes, stopping at else/elsif/end* tags ----
 
-  defp parse_template(tokens), do: parse_template(tokens, [])
+  defp parse_template(tokens), do: parse_template(tokens, [], false)
 
-  defp parse_template([], acc), do: {:ok, Enum.reverse(acc), []}
+  defp parse_template([], acc, _in_loop?), do: {:ok, Enum.reverse(acc), []}
 
-  defp parse_template([token | _rest] = tokens, acc) do
+  defp parse_template([token | _rest] = tokens, acc, in_loop?) do
     if stopping_token?(token) do
       {:ok, Enum.reverse(acc), tokens}
     else
-      with {:ok, node, rest} <- parse_node(tokens) do
-        parse_template(rest, [node | acc])
+      with {:ok, node, rest} <- parse_node(tokens, in_loop?) do
+        parse_template(rest, [node | acc], in_loop?)
       end
     end
   end
@@ -225,17 +228,25 @@ defmodule Alembic.Parser do
 
   # ---- Single node dispatch ----
 
-  defp parse_node([{:text, content, _pos} | rest]), do: {:ok, {:text, content}, rest}
+  defp parse_node([{:text, content, _pos} | rest], _in_loop?), do: {:ok, {:text, content}, rest}
 
-  defp parse_node([{:output, raw, _strip_left, _strip_right, _pos} | rest]) do
+  defp parse_node([{:output, raw, _strip_left, _strip_right, _pos} | rest], _in_loop?) do
     case Expression.parse(raw) do
       {:ok, expr} -> output_node_from_expr(expr, raw, rest)
       {:error, reason} -> {:error, {:invalid_expression, raw, reason}}
     end
   end
 
-  defp parse_node([{:tag, content, _strip_left, _strip_right, pos} | rest]) do
-    dispatch_tag(content, rest, pos)
+  defp parse_node([{:tag, "break", _sl, _sr, pos} | rest], in_loop?) do
+    if in_loop?, do: {:ok, {:break}, rest}, else: {:error, {:break_outside_loop, pos}}
+  end
+
+  defp parse_node([{:tag, "continue", _sl, _sr, pos} | rest], in_loop?) do
+    if in_loop?, do: {:ok, {:continue}, rest}, else: {:error, {:continue_outside_loop, pos}}
+  end
+
+  defp parse_node([{:tag, content, _sl, _sr, pos} | rest], in_loop?) do
+    dispatch_tag(content, rest, pos, in_loop?)
   end
 
   defp output_node_from_expr({:variable, path}, _raw, rest), do: {:ok, {:output, path, []}, rest}
@@ -250,47 +261,58 @@ defmodule Alembic.Parser do
 
   # ---- Tag keyword dispatch (tag content is already trimmed by the Lexer) ----
 
-  defp dispatch_tag("if " <> condition_raw, rest, pos), do: parse_if(condition_raw, rest, pos)
-  defp dispatch_tag("for " <> spec, rest, pos), do: parse_for(spec, rest, pos)
-  defp dispatch_tag("assign " <> spec, rest, _pos), do: parse_assign(spec, rest)
-  defp dispatch_tag("extends " <> raw, rest, _pos), do: parse_extends(raw, rest)
-  defp dispatch_tag("block " <> name, rest, pos), do: parse_block(String.trim(name), rest, pos)
-  defp dispatch_tag("include " <> raw, rest, _pos), do: parse_include(raw, rest)
-  defp dispatch_tag(other, _rest, _pos), do: {:error, {:unexpected_tag, other}}
+  defp dispatch_tag("if " <> condition_raw, rest, pos, in_loop?),
+    do: parse_if(condition_raw, rest, pos, in_loop?)
+
+  defp dispatch_tag("for " <> spec, rest, pos, _in_loop?),
+    do: parse_for(spec, rest, pos)
+
+  defp dispatch_tag("assign " <> spec, rest, _pos, _in_loop?), do: parse_assign(spec, rest)
+  defp dispatch_tag("extends " <> raw, rest, _pos, _in_loop?), do: parse_extends(raw, rest)
+
+  defp dispatch_tag("block " <> name, rest, pos, in_loop?),
+    do: parse_block(String.trim(name), rest, pos, in_loop?)
+
+  defp dispatch_tag("include " <> raw, rest, _pos, _in_loop?), do: parse_include(raw, rest)
+  defp dispatch_tag("cycle", _rest, _pos, _in_loop?), do: {:error, {:malformed_cycle, :empty}}
+  defp dispatch_tag("cycle " <> spec, rest, _pos, _in_loop?), do: parse_cycle(spec, rest)
+  defp dispatch_tag(other, _rest, _pos, _in_loop?), do: {:error, {:unexpected_tag, other}}
 
   # ---- If / elsif* / else? / endif ----
 
-  defp parse_if(condition_raw, tokens, pos) do
+  defp parse_if(condition_raw, tokens, pos, in_loop?) do
     with {:ok, condition} <- Expression.parse(condition_raw),
-         {:ok, then_branch, rest} <- parse_template(tokens),
-         {:ok, elsif_branches, rest2} <- parse_elsifs(rest),
-         {:ok, else_branch, rest3} <- parse_optional_else(rest2),
+         {:ok, then_branch, rest} <- parse_template(tokens, [], in_loop?),
+         {:ok, elsif_branches, rest2} <- parse_elsifs(rest, in_loop?),
+         {:ok, else_branch, rest3} <- parse_optional_else(rest2, in_loop?),
          {:ok, rest4} <- expect_tag(rest3, "endif", pos) do
       {:ok, {:if, condition, then_branch, elsif_branches, else_branch}, rest4}
     end
   end
 
-  defp parse_elsifs(tokens), do: parse_elsifs(tokens, [])
+  defp parse_elsifs(tokens, in_loop?), do: parse_elsifs(tokens, [], in_loop?)
 
-  defp parse_elsifs([{:tag, "elsif " <> condition_raw, _sl, _sr, _pos} | rest], acc) do
+  defp parse_elsifs([{:tag, "elsif " <> condition_raw, _sl, _sr, _pos} | rest], acc, in_loop?) do
     with {:ok, condition} <- Expression.parse(condition_raw),
-         {:ok, branch, rest2} <- parse_template(rest) do
-      parse_elsifs(rest2, [{condition, branch} | acc])
+         {:ok, branch, rest2} <- parse_template(rest, [], in_loop?) do
+      parse_elsifs(rest2, [{condition, branch} | acc], in_loop?)
     end
   end
 
-  defp parse_elsifs(tokens, acc), do: {:ok, Enum.reverse(acc), tokens}
+  defp parse_elsifs(tokens, acc, _in_loop?), do: {:ok, Enum.reverse(acc), tokens}
 
-  defp parse_optional_else([{:tag, "else", _sl, _sr, _pos} | rest]), do: parse_template(rest)
-  defp parse_optional_else(tokens), do: {:ok, nil, tokens}
+  defp parse_optional_else([{:tag, "else", _sl, _sr, _pos} | rest], in_loop?),
+    do: parse_template(rest, [], in_loop?)
+
+  defp parse_optional_else(tokens, _in_loop?), do: {:ok, nil, tokens}
 
   # ---- For var in iterable / else? / endfor ----
 
   defp parse_for(spec, tokens, pos) do
     with {:ok, var_name, iterable_raw} <- split_for_spec(spec),
-         {:ok, iterable} <- Expression.parse(iterable_raw),
-         {:ok, body, rest} <- parse_template(tokens),
-         {:ok, else_branch, rest2} <- parse_optional_else(rest),
+         {:ok, iterable} <- Expression.parse(iterable_raw, true),
+         {:ok, body, rest} <- parse_template(tokens, [], true),
+         {:ok, else_branch, rest2} <- parse_optional_else(rest, true),
          {:ok, rest3} <- expect_tag(rest2, "endfor", pos) do
       {:ok, {:for, var_name, iterable, body, else_branch}, rest3}
     end
@@ -328,8 +350,8 @@ defmodule Alembic.Parser do
     end
   end
 
-  defp parse_block(name, tokens, pos) do
-    with {:ok, body, rest} <- parse_template(tokens),
+  defp parse_block(name, tokens, pos, in_loop?) do
+    with {:ok, body, rest} <- parse_template(tokens, [], in_loop?),
          {:ok, rest2} <- expect_tag(rest, "endblock", pos) do
       {:ok, {:block, name, body}, rest2}
     end
@@ -408,6 +430,85 @@ defmodule Alembic.Parser do
 
   defp iodata_to_string(reversed_chars),
     do: reversed_chars |> Enum.reverse() |> IO.iodata_to_binary()
+
+  # ---- Cycle ----
+
+  defp parse_cycle(spec, tokens) do
+    case String.trim(spec) do
+      "" -> {:error, {:malformed_cycle, :empty}}
+      trimmed -> parse_cycle_content(trimmed, tokens)
+    end
+  end
+
+  defp parse_cycle_content(spec, tokens) do
+    case find_top_level_colon(spec) do
+      {:found, before_colon, after_colon} ->
+        parse_named_or_unnamed_cycle(before_colon, after_colon, spec, tokens)
+
+      :not_found ->
+        build_cycle(nil, spec, tokens)
+    end
+  end
+
+  defp parse_named_or_unnamed_cycle(before_colon, after_colon, spec, tokens) do
+    case parse_cycle_group_name(before_colon) do
+      {:ok, group} -> build_cycle(group, after_colon, tokens)
+      :not_a_group -> build_cycle(nil, spec, tokens)
+    end
+  end
+
+  defp build_cycle(group, values_raw, tokens) do
+    with {:ok, values} <- parse_cycle_values(values_raw) do
+      {:ok, {:cycle, group, values}, tokens}
+    end
+  end
+
+  defp parse_cycle_group_name(raw) do
+    raw = String.trim(raw)
+
+    case Expression.parse(raw) do
+      {:ok, {:literal, name}} when is_binary(name) -> {:ok, name}
+      {:ok, {:variable, [name]}} -> {:ok, name}
+      _ -> :not_a_group
+    end
+  end
+
+  defp parse_cycle_values(raw) do
+    raw
+    |> split_top_level_commas()
+    |> Enum.reduce_while({:ok, []}, fn part, {:ok, acc} ->
+      trimmed = String.trim(part)
+
+      case Expression.parse(trimmed) do
+        {:ok, expr} -> {:cont, {:ok, [expr | acc]}}
+        {:error, reason} -> {:halt, {:error, {:invalid_expression, trimmed, reason}}}
+      end
+    end)
+    |> case do
+      {:ok, values} -> {:ok, Enum.reverse(values)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp find_top_level_colon(str), do: find_top_level_colon(str, [], nil)
+
+  defp find_top_level_colon(<<>>, _acc, _quote), do: :not_found
+
+  defp find_top_level_colon(<<?:, rest::binary>>, acc, nil) do
+    {:found, acc |> Enum.reverse() |> IO.iodata_to_binary(), rest}
+  end
+
+  defp find_top_level_colon(<<c::utf8, rest::binary>>, acc, nil) when c in [?", ?'] do
+    find_top_level_colon(rest, [<<c::utf8>> | acc], c)
+  end
+
+  defp find_top_level_colon(<<c::utf8, rest::binary>>, acc, quote) when c == quote do
+    find_top_level_colon(rest, [<<c::utf8>> | acc], nil)
+  end
+
+  defp find_top_level_colon(<<c::utf8, rest::binary>>, acc, quote) do
+    find_top_level_colon(rest, [<<c::utf8>> | acc], quote)
+  end
 
   # ---- Shared helpers ----
 

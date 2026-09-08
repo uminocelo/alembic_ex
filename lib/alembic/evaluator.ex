@@ -36,6 +36,7 @@ defmodule Alembic.Evaluator do
           | {:include_not_found, String.t(), term()}
           | :include_loader_not_configured
           | {:include_compile_error, term()}
+          | {:range_non_integer, term(), term()}
           | Filters.reason()
 
   @doc """
@@ -57,17 +58,24 @@ defmodule Alembic.Evaluator do
   def eval(nodes, %Context{} = ctx) when is_list(nodes) do
     case eval_nodes(nodes, ctx) do
       {:ok, iolist, _ctx} -> {:ok, IO.iodata_to_binary(iolist)}
+      {:break, iolist, _ctx} -> {:ok, IO.iodata_to_binary(iolist)}
+      {:continue, iolist, _ctx} -> {:ok, IO.iodata_to_binary(iolist)}
       {:error, reason} -> {:error, reason}
     end
   end
 
-  # Returns {:ok, iodata, new_ctx} | {:error, reason} — every eval_node/2
+  # Returns {:ok, iodata, new_ctx} | {:break, iodata, new_ctx} |
+  # {:continue, iodata, new_ctx} | {:error, reason} — every eval_node/2
   # clause returns this same shape so assign's context change threads
   # through the fold below to every sibling node that follows it.
+  # {:break}/{:continue} propagate up from inside a for body to the
+  # enclosing eval_for_items, which interprets and consumes them.
   defp eval_nodes(nodes, ctx) do
     Enum.reduce_while(nodes, {:ok, [], ctx}, fn node, {:ok, acc, ctx} ->
       case eval_node(node, ctx) do
         {:ok, chunk, new_ctx} -> {:cont, {:ok, [acc, chunk], new_ctx}}
+        {:break, chunk, new_ctx} -> {:halt, {:break, [acc, chunk], new_ctx}}
+        {:continue, chunk, new_ctx} -> {:halt, {:continue, [acc, chunk], new_ctx}}
         {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
@@ -108,6 +116,20 @@ defmodule Alembic.Evaluator do
     end
   end
 
+  defp eval_node({:break}, ctx), do: {:break, "", ctx}
+  defp eval_node({:continue}, ctx), do: {:continue, "", ctx}
+
+  defp eval_node({:cycle, group, value_exprs}, ctx) do
+    key = cycle_key(group, value_exprs)
+    index = Map.get(ctx.cycles, key, 0)
+
+    with {:ok, values} <- eval_cycle_values(value_exprs, ctx) do
+      value = Enum.at(values, rem(index, length(values)))
+      new_ctx = %{ctx | cycles: Map.put(ctx.cycles, key, index + 1)}
+      {:ok, to_output_string(value), new_ctx}
+    end
+  end
+
   defp eval_node({:include, name, variables}, ctx) do
     with {:ok, loader_fn} <- require_loader(ctx),
          {:ok, source} <- call_loader(loader_fn, name),
@@ -116,8 +138,17 @@ defmodule Alembic.Evaluator do
       include_ctx = Context.push_scope(ctx, resolved_vars)
 
       case eval_nodes(ast, include_ctx) do
-        {:ok, chunk, new_include_ctx} -> {:ok, chunk, Context.pop_scope(new_include_ctx)}
-        {:error, reason} -> {:error, reason}
+        {:ok, chunk, new_include_ctx} ->
+          {:ok, chunk, Context.pop_scope(new_include_ctx)}
+
+        {:break, chunk, new_include_ctx} ->
+          {:break, chunk, Context.pop_scope(new_include_ctx)}
+
+        {:continue, chunk, new_include_ctx} ->
+          {:continue, chunk, Context.pop_scope(new_include_ctx)}
+
+        {:error, reason} ->
+          {:error, reason}
       end
     end
   end
@@ -137,6 +168,22 @@ defmodule Alembic.Evaluator do
   defp eval_optional_branch(nil, ctx), do: {:ok, "", ctx}
   defp eval_optional_branch(branch, ctx), do: eval_nodes(branch, ctx)
 
+  defp cycle_key(nil, value_exprs), do: {:unnamed, value_exprs}
+  defp cycle_key(group, _value_exprs), do: {:named, group}
+
+  defp eval_cycle_values(value_exprs, ctx) do
+    Enum.reduce_while(value_exprs, {:ok, []}, fn expr, {:ok, acc} ->
+      case eval_expr(expr, ctx) do
+        {:ok, value} -> {:cont, {:ok, [value | acc]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, values} -> {:ok, Enum.reverse(values)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   defp eval_for_items(items, var, body, ctx) do
     length = Enum.count(items)
 
@@ -148,6 +195,12 @@ defmodule Alembic.Evaluator do
 
       case eval_nodes(body, iter_ctx) do
         {:ok, chunk, new_iter_ctx} ->
+          {:cont, {:ok, [acc, chunk], Context.pop_scope(new_iter_ctx)}}
+
+        {:break, chunk, new_iter_ctx} ->
+          {:halt, {:ok, [acc, chunk], Context.pop_scope(new_iter_ctx)}}
+
+        {:continue, chunk, new_iter_ctx} ->
           {:cont, {:ok, [acc, chunk], Context.pop_scope(new_iter_ctx)}}
 
         {:error, reason} ->
@@ -235,6 +288,22 @@ defmodule Alembic.Evaluator do
   defp eval_expr({:not, expr}, ctx) do
     with {:ok, value} <- eval_expr(expr, ctx) do
       {:ok, not truthy?(value)}
+    end
+  end
+
+  defp eval_expr({:range, from_expr, to_expr}, ctx) do
+    with {:ok, from} <- eval_expr(from_expr, ctx),
+         {:ok, to} <- eval_expr(to_expr, ctx) do
+      case {from, to} do
+        {f, t} when is_integer(f) and is_integer(t) and f <= t ->
+          {:ok, Enum.to_list(f..t//1)}
+
+        {f, t} when is_integer(f) and is_integer(t) ->
+          {:ok, []}
+
+        _ ->
+          {:error, {:range_non_integer, from, to}}
+      end
     end
   end
 

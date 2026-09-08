@@ -245,6 +245,78 @@ defmodule Alembic.ParserTest do
     end
   end
 
+  describe "break and continue tags" do
+    test "break inside a for loop produces a :break node" do
+      assert {:ok, [{:for, "i", {:variable, ["xs"]}, [{:break}], nil}]} =
+               parse("{% for i in xs %}{% break %}{% endfor %}")
+    end
+
+    test "continue inside a for loop produces a :continue node" do
+      assert {:ok, [{:for, "i", {:variable, ["xs"]}, [{:continue}], nil}]} =
+               parse("{% for i in xs %}{% continue %}{% endfor %}")
+    end
+
+    test "break inside a nested if inside a for is allowed" do
+      assert {:ok,
+              [
+                {:for, "i", {:variable, ["xs"]},
+                 [
+                   {:if, {:variable, ["i"]}, [{:break}], [], nil}
+                 ], nil}
+              ]} =
+               parse("{% for i in xs %}{% if i %}{% break %}{% endif %}{% endfor %}")
+    end
+
+    test "break at template top level is a parse error" do
+      assert {:error, {:break_outside_loop, %{line: 1, col: 1}}} = parse("{% break %}")
+    end
+
+    test "continue at template top level is a parse error" do
+      assert {:error, {:continue_outside_loop, %{line: 1, col: 1}}} = parse("{% continue %}")
+    end
+
+    test "break inside an if at top level (not in a loop) is a parse error" do
+      assert {:error, {:break_outside_loop, %{line: 1, col: 11}}} =
+               parse("{% if x %}{% break %}{% endif %}")
+    end
+  end
+
+  describe "cycle tag" do
+    test "unnamed cycle with string literals" do
+      assert {:ok, [{:cycle, nil, [{:literal, "a"}, {:literal, "b"}]}]} =
+               parse(~s({% cycle "a", "b" %}))
+    end
+
+    test "named cycle with string group" do
+      assert {:ok, [{:cycle, "rows", [{:literal, "a"}, {:literal, "b"}]}]} =
+               parse(~s({% cycle "rows": "a", "b" %}))
+    end
+
+    test "named cycle with bare-identifier group" do
+      assert {:ok, [{:cycle, "rows", [{:literal, "a"}, {:literal, "b"}]}]} =
+               parse(~S({% cycle rows: "a", "b" %}))
+    end
+
+    test "cycle with variable values" do
+      assert {:ok, [{:cycle, nil, [{:variable, ["x"]}, {:variable, ["y"]}]}]} =
+               parse("{% cycle x, y %}")
+    end
+
+    test "cycle with no arguments is a parse error" do
+      assert {:error, {:malformed_cycle, :empty}} = parse("{% cycle %}")
+    end
+
+    test "cycle with single value" do
+      assert {:ok, [{:cycle, nil, [{:literal, "only"}]}]} =
+               parse(~s({% cycle "only" %}))
+    end
+
+    test "cycle with integer values" do
+      assert {:ok, [{:cycle, nil, [{:literal, 1}, {:literal, 2}]}]} =
+               parse("{% cycle 1, 2 %}")
+    end
+  end
+
   describe "grammar worked example" do
     test "for/if/output/filter nesting from docs/grammar.md" do
       template = """
