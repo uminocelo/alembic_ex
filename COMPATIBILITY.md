@@ -63,10 +63,8 @@ hand-written in `test/integration/liquid_compat_test.exs`.
   `assigns` map passed to `render/3`
 - `{% render %}` (isolated-scope include) — only classic `{% include %}`
   (shared scope) exists
-- `{% cycle %}`, `{% increment %}`, `{% decrement %}` tags
+- `{% increment %}`, `{% decrement %}` tags
 - Liquid's `{% liquid %}` shorthand block syntax
-- Ranges as iterables (`{% for i in (1..5) %}`) — `{% for %}` only accepts
-  an array-valued expression, not an inline range literal
 - Multi-argument `{% assign %}` expressions beyond a single filter chain
 
 ## Extension features (Alembic adds beyond Liquid)

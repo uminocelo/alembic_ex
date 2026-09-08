@@ -9,7 +9,7 @@ defmodule Alembic.Context do
   """
 
   @enforce_keys [:scopes]
-  defstruct scopes: [], assigns: %{}, strict: false, loader_fn: nil, custom_filters: []
+  defstruct scopes: [], assigns: %{}, strict: false, loader_fn: nil, custom_filters: [], cycles: %{}
 
   @type loader_fn :: (String.t() -> {:ok, String.t()} | {:error, term()})
   @type t :: %__MODULE__{
@@ -17,7 +17,8 @@ defmodule Alembic.Context do
           assigns: map(),
           strict: boolean(),
           loader_fn: loader_fn() | nil,
-          custom_filters: [module()]
+          custom_filters: [module()],
+          cycles: map()
         }
 
   @doc """

@@ -23,6 +23,9 @@ node         = text
              | block
              | extends
              | include
+             | break
+             | continue
+             | cycle
              ;
 
 (* Literal text passthrough. Never contains a raw "{{" or "{%" — those always
@@ -70,6 +73,19 @@ include      = TAG_OPEN , "include" , STRING
                , TAG_CLOSE
                ;
 
+(* Loop control: valid only inside a for_block body — enforced
+   context-sensitively by the parser, like the "extends must be first"
+   constraint in section 5.5. *)
+break        = TAG_OPEN , "break" , TAG_CLOSE ;
+continue     = TAG_OPEN , "continue" , TAG_CLOSE ;
+
+(* Cycle: round-robin value output. Optional named group shares state
+   across all same-named cycles in one render; unnamed cycles are keyed
+   by their argument list. *)
+cycle        = TAG_OPEN , "cycle" , [ group , ":" ] , expr_list , TAG_CLOSE ;
+group        = STRING | IDENT ;
+expr_list    = expr , { "," , expr } ;
+
 variable_list = assignment_pair , { "," , assignment_pair } ;
 assignment_pair = IDENT , ":" , expr ;
 
@@ -102,7 +118,8 @@ and_expr         = not_expr , { "and" , not_expr } ;
 not_expr         = [ "not" ] , comparison ;
 comparison       = filtered_primary , [ compare_op , filtered_primary ] ;
 filtered_primary = primary , { filter } ;
-primary          = variable | literal ;
+primary          = variable | literal | range ;
+range            = "(" , expr , ".." , expr , ")" ;
 
 variable     = IDENT , { "." , ( IDENT | INTEGER ) | "[" , ( STRING | INTEGER ) , "]" } ;
 literal      = STRING | INTEGER | FLOAT | "true" | "false" | "nil" | "null" ;
@@ -129,6 +146,7 @@ Each production maps onto exactly one `Alembic.AST.expr()` shape:
 | `comparison` (with `compare_op`) | `{:compare, op, left, right}` |
 | `and_expr` / `or_expr` | `{:logical, :and \| :or, left, right}` |
 | `not_expr` (with `not`) | `{:not, expr}` |
+| `range` | `{:range, from_expr, to_expr}` |
 | `filter` | `{:filter, name, args}` — `args :: [expr()]` |
 
 Top-level node productions map onto `Alembic.AST.ast_node()` shapes:
@@ -143,6 +161,9 @@ Top-level node productions map onto `Alembic.AST.ast_node()` shapes:
 | `extends` | `{:extends, template_name}` |
 | `block` | `{:block, name, body}` |
 | `include` | `{:include, template_name, variables}` |
+| `break` | `{:break}` |
+| `continue` | `{:continue}` |
+| `cycle` | `{:cycle, group, values}` — `group :: String.t() \| nil`, `values :: [expr()]` |
 
 ---
 
