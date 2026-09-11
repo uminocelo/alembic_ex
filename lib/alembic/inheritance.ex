@@ -9,7 +9,10 @@ defmodule Alembic.Inheritance do
 
     * **Pass 1 — collect** (`collect_blocks/1`): walk a template's AST and
       gather its `{:block, name, body}` definitions into a `name => body`
-      map — a symbol-collection pass.
+      map — a symbol-collection pass. The walk descends through every
+      container node that can hold block-level children (`if`/`for`/
+      `capture`/`case`), so a `{% block %}` nested inside any of them is
+      still collected and resolved.
     * **Pass 2 — resolve** (`resolve/2`): walk a (possibly different)
       template's AST and splice each `{:block, name, default}` node's body
       for the matching override from the collected map, or keep `default`
@@ -60,8 +63,9 @@ defmodule Alembic.Inheritance do
   @default_max_depth 10
 
   @doc """
-  Pass 1 — walks an AST (recursing into `if`/`for` branches) and collects
-  its `{:block, name, body}` definitions into a `name => body` map.
+  Pass 1 — walks an AST (recursing into `if`/`for`/`capture`/`case` bodies)
+  and collects its `{:block, name, body}` definitions into a `name => body`
+  map.
 
   ## Examples
 
@@ -159,6 +163,19 @@ defmodule Alembic.Inheritance do
     end
   end
 
+  defp do_collect_blocks([{:capture, _var, body} | rest], acc) do
+    with {:ok, acc2} <- do_collect_blocks(body, acc) do
+      do_collect_blocks(rest, acc2)
+    end
+  end
+
+  defp do_collect_blocks([{:case, _subject, whens, else_b} | rest], acc) do
+    with {:ok, acc2} <- collect_from_whens(whens, acc),
+         {:ok, acc3} <- do_collect_blocks(else_b || [], acc2) do
+      do_collect_blocks(rest, acc3)
+    end
+  end
+
   defp do_collect_blocks([_other | rest], acc), do: do_collect_blocks(rest, acc)
 
   defp collect_from_elsifs([], acc), do: {:ok, acc}
@@ -166,6 +183,14 @@ defmodule Alembic.Inheritance do
   defp collect_from_elsifs([{_cond, branch} | rest], acc) do
     with {:ok, acc2} <- do_collect_blocks(branch, acc) do
       collect_from_elsifs(rest, acc2)
+    end
+  end
+
+  defp collect_from_whens([], acc), do: {:ok, acc}
+
+  defp collect_from_whens([{_values, branch} | rest], acc) do
+    with {:ok, acc2} <- do_collect_blocks(branch, acc) do
+      collect_from_whens(rest, acc2)
     end
   end
 
@@ -189,6 +214,14 @@ defmodule Alembic.Inheritance do
     [{:for, var, iterable, resolve(body, child_blocks), resolve_maybe(else_b, child_blocks)}]
   end
 
+  defp resolve_node({:capture, var, body}, child_blocks) do
+    [{:capture, var, resolve(body, child_blocks)}]
+  end
+
+  defp resolve_node({:case, subject, whens, else_b}, child_blocks) do
+    [{:case, subject, resolve_whens(whens, child_blocks), resolve_maybe(else_b, child_blocks)}]
+  end
+
   defp resolve_node(other, _child_blocks), do: [other]
 
   defp resolve_maybe(nil, _child_blocks), do: nil
@@ -196,6 +229,10 @@ defmodule Alembic.Inheritance do
 
   defp resolve_elsifs(elsifs, child_blocks) do
     Enum.map(elsifs, fn {condition, branch} -> {condition, resolve(branch, child_blocks)} end)
+  end
+
+  defp resolve_whens(whens, child_blocks) do
+    Enum.map(whens, fn {values, branch} -> {values, resolve(branch, child_blocks)} end)
   end
 
   defp substitute_block_super(override_body, default_body) do

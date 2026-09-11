@@ -375,4 +375,115 @@ defmodule Alembic.EvaluatorTest do
                render(~s({% if s contains "ell" %}yes{% else %}no{% endif %}), %{"s" => "hello"})
     end
   end
+
+  describe "capture node" do
+    test "captures rendered body and outputs it later" do
+      template = "{% capture x %}Hi {{ name }}{% endcapture %}[{{ x }}]"
+      assert {:ok, "[Hi Al]"} = render(template, %{"name" => "Al"})
+    end
+
+    test "capture itself renders nothing" do
+      assert {:ok, "before after"} =
+               render("before {% capture x %}ignored{% endcapture %}after", %{})
+    end
+
+    test "nested captures work" do
+      template =
+        "{% capture x %}outer {% capture y %}inner{% endcapture %}mid{% endcapture %}{{ x }}|{{ y }}"
+
+      assert {:ok, "outer mid|inner"} = render(template, %{})
+    end
+
+    test "capture inside a loop re-assigns; final value is the last iteration" do
+      template =
+        "{% for i in items %}{% capture last %}{{ i }}{% endcapture %}{% endfor %}{{ last }}"
+
+      assert {:ok, "3"} = render(template, %{"items" => [1, 2, 3]})
+    end
+
+    test "filters apply to a captured variable" do
+      template = "{% capture x %}hi{% endcapture %}{{ x | upcase }}"
+      assert {:ok, "HI"} = render(template, %{})
+    end
+
+    test "captured variable is visible inside a later include" do
+      ctx =
+        Alembic.Context.new(%{"name" => "Al"})
+        |> Alembic.Context.loader(fn
+          "partial" -> {:ok, "[{{ greeting }}]"}
+          _ -> {:error, :not_found}
+        end)
+
+      ast = [
+        {:capture, "greeting", [{:text, "Hi "}, {:output, ["name"], []}]},
+        {:include, "partial", %{}}
+      ]
+
+      assert {:ok, "[Hi Al]"} = Alembic.Evaluator.eval(ast, ctx)
+    end
+  end
+
+  describe "unless node (desugared if)" do
+    test "renders body when the condition is falsy" do
+      assert {:ok, "no"} = render("{% unless x %}no{% endunless %}", %{})
+    end
+
+    test "renders the else branch when the condition is truthy" do
+      assert {:ok, "yes"} = render("{% unless x %}no{% else %}yes{% endunless %}", %{"x" => true})
+    end
+
+    test "0 is truthy, so the unless body over 0 does not render" do
+      assert {:ok, "yes"} = render("{% unless n %}no{% else %}yes{% endunless %}", %{"n" => 0})
+    end
+  end
+
+  describe "case node" do
+    test "single-value when matches" do
+      template = "{% case x %}{% when 1 %}one{% when 2 %}two{% endcase %}"
+      assert {:ok, "two"} = render(template, %{"x" => 2})
+    end
+
+    test "multi-value when matches any of its values" do
+      template = "{% case x %}{% when 1, 2, 3 %}low{% else %}high{% endcase %}"
+      assert {:ok, "low"} = render(template, %{"x" => 3})
+      assert {:ok, "high"} = render(template, %{"x" => 9})
+    end
+
+    test "else branch on no match" do
+      template = "{% case x %}{% when 1 %}one{% else %}other{% endcase %}"
+      assert {:ok, "other"} = render(template, %{"x" => 5})
+    end
+
+    test "no match and no else renders empty" do
+      template = "{% case x %}{% when 1 %}one{% endcase %}"
+      assert {:ok, ""} = render(template, %{"x" => 5})
+    end
+
+    test "string subjects and values" do
+      template = ~s({% case color %}{% when "red" %}R{% when "blue" %}B{% endcase %})
+      assert {:ok, "B"} = render(template, %{"color" => "blue"})
+    end
+
+    test "variable values in a when" do
+      template = "{% case x %}{% when a %}match{% else %}no{% endcase %}"
+      assert {:ok, "match"} = render(template, %{"x" => 7, "a" => 7})
+    end
+
+    test "first matching when wins" do
+      template = "{% case x %}{% when 1 %}first{% when 1 %}second{% endcase %}"
+      assert {:ok, "first"} = render(template, %{"x" => 1})
+    end
+
+    test "nested case inside for and if" do
+      template =
+        "{% for i in items %}{% case i %}{% when 1 %}a{% else %}{% if i > 1 %}b{% endif %}{% endcase %}{% endfor %}"
+
+      assert {:ok, "abb"} = render(template, %{"items" => [1, 2, 3]})
+    end
+
+    test "a when value may carry a filtered expression with comma-separated args" do
+      template = ~s({% case s %}{% when t | replace: "a", "b" %}hit{% else %}miss{% endcase %})
+      assert {:ok, "hit"} = render(template, %{"s" => "b", "t" => "a"})
+    end
+  end
 end

@@ -35,6 +35,17 @@ defmodule Alembic.InheritanceTest do
                Inheritance.collect_blocks(ast)
     end
 
+    test "collects blocks nested inside capture and case" do
+      ast =
+        compile(
+          "{% capture c %}{% block a %}A{% endblock %}{% endcapture %}" <>
+            "{% case x %}{% when 1 %}{% block b %}B{% endblock %}{% else %}{% block d %}D{% endblock %}{% endcase %}"
+        )
+
+      assert {:ok, %{"a" => [{:text, "A"}], "b" => [{:text, "B"}], "d" => [{:text, "D"}]}} =
+               Inheritance.collect_blocks(ast)
+    end
+
     test "errors on duplicate block names" do
       ast = compile("{% block a %}1{% endblock %}{% block a %}2{% endblock %}")
       assert {:error, {:duplicate_block, "a"}} = Inheritance.collect_blocks(ast)
@@ -65,6 +76,19 @@ defmodule Alembic.InheritanceTest do
         Inheritance.resolve(parent, %{"a" => [{:text, "custom"}]})
 
       assert then_branch == [{:text, "custom"}]
+    end
+
+    test "resolves blocks nested inside capture and case" do
+      parent =
+        compile(
+          "{% capture c %}{% block a %}default{% endblock %}{% endcapture %}" <>
+            "{% case x %}{% when 1 %}{% block b %}default{% endblock %}{% endcase %}"
+        )
+
+      assert [
+               {:capture, "c", [{:text, "A"}]},
+               {:case, _subject, [{[{:literal, 1}], [{:text, "B"}]}], nil}
+             ] = Inheritance.resolve(parent, %{"a" => [{:text, "A"}], "b" => [{:text, "B"}]})
     end
   end
 
@@ -104,6 +128,22 @@ defmodule Alembic.InheritanceTest do
         ~s({% extends "base.html" %}{% block title %}Prefix - {{ block.super }}{% endblock %})
 
       assert {:ok, "<html>Prefix - Default Title</html>"} = render(child, loader)
+    end
+
+    test "a block nested inside capture is overridden and rendered" do
+      base = "{% capture c %}{% block inner %}base{% endblock %}{% endcapture %}{{ c }}"
+      loader = fn "base.html" -> {:ok, base} end
+      child = ~s({% extends "base.html" %}{% block inner %}child{% endblock %})
+      assert {:ok, "child"} = render(child, loader)
+    end
+
+    test "a block nested inside a case when is overridden and rendered" do
+      base =
+        "{% case x %}{% when 1 %}{% block b %}base{% endblock %}{% endcase %}"
+
+      loader = fn "base.html" -> {:ok, base} end
+      child = ~s({% extends "base.html" %}{% block b %}child{% endblock %})
+      assert {:ok, "child"} = render(child, loader, %{"x" => 1})
     end
   end
 

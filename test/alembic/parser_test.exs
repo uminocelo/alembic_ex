@@ -317,6 +317,92 @@ defmodule Alembic.ParserTest do
     end
   end
 
+  describe "capture tag" do
+    test "parses capture with a body" do
+      assert {:ok, [{:capture, "x", [{:text, "hi"}]}]} =
+               parse("{% capture x %}hi{% endcapture %}")
+    end
+
+    test "capture body may contain other nodes" do
+      assert {:ok, [{:capture, "x", [{:output, ["name"], []}, {:text, "!"}]}]} =
+               parse("{% capture x %}{{ name }}!{% endcapture %}")
+    end
+
+    test "missing endcapture returns a structured error with the opening position" do
+      assert {:error, {:missing_end_tag, "endcapture", %{line: 1, col: 1}}} =
+               parse("{% capture x %}no close")
+    end
+
+    test "rejects a non-identifier capture name" do
+      assert {:error, {:malformed_capture, "foo.bar"}} =
+               parse("{% capture foo.bar %}x{% endcapture %}")
+
+      assert {:error, {:malformed_capture, "x y"}} =
+               parse("{% capture x y %}z{% endcapture %}")
+    end
+  end
+
+  describe "unless tag" do
+    test "desugars to a negated if node" do
+      assert {:ok, [{:if, {:not, {:variable, ["x"]}}, [{:text, "no"}], [], nil}]} =
+               parse("{% unless x %}no{% endunless %}")
+    end
+
+    test "supports an else branch" do
+      assert {:ok, [{:if, {:not, {:variable, ["x"]}}, [{:text, "no"}], [], [{:text, "yes"}]}]} =
+               parse("{% unless x %}no{% else %}yes{% endunless %}")
+    end
+
+    test "elsif inside an unless is a parse error" do
+      assert {:error, {:if_elsif_in_unless, _pos}} =
+               parse("{% unless x %}a{% elsif y %}b{% endunless %}")
+    end
+  end
+
+  describe "case/when tag" do
+    test "single-value when with else" do
+      assert {:ok, [{:case, {:variable, ["x"]}, [{[{:literal, 1}], [{:text, "one"}]}], _else}]} =
+               parse("{% case x %}{% when 1 %}one{% else %}other{% endcase %}")
+    end
+
+    test "comma-separated values collapse into one when" do
+      assert {:ok,
+              [{:case, _subject, [{[{:literal, 1}, {:literal, 2}, {:literal, 3}], _body}], _e}]} =
+               parse("{% case x %}{% when 1, 2, 3 %}many{% endcase %}")
+    end
+
+    test "a filter's argument commas stay within a single when value" do
+      assert {:ok, [{:case, _subject, [{[value], _body}], _else}]} =
+               parse(~s({% case x %}{% when t | append: "a", "b" %}many{% endcase %}))
+
+      assert value ==
+               {:filter_chain, {:variable, ["t"]},
+                [{:filter, "append", [{:literal, "a"}, {:literal, "b"}]}]}
+    end
+
+    test "multiple whens are preserved in order" do
+      assert {:ok, [{:case, _subject, whens, _else}]} =
+               parse("{% case x %}{% when 1 %}a{% when 2 %}b{% endcase %}")
+
+      assert [{[{:literal, 1}], _}, {[{:literal, 2}], _}] = whens
+    end
+
+    test "no else yields a nil else branch" do
+      assert {:ok, [{:case, _subject, _whens, nil}]} =
+               parse("{% case x %}{% when 1 %}a{% endcase %}")
+    end
+
+    test "else before any when is a parse error" do
+      assert {:error, {:else_before_when, _pos}} =
+               parse("{% case x %}{% else %}e{% when 1 %}a{% endcase %}")
+    end
+
+    test "missing endcase returns a structured error with the opening position" do
+      assert {:error, {:missing_end_tag, "endcase", %{line: 1, col: 1}}} =
+               parse("{% case x %}{% when 1 %}a")
+    end
+  end
+
   describe "grammar worked example" do
     test "for/if/output/filter nesting from docs/grammar.md" do
       template = """

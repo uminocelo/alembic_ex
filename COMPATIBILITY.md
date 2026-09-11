@@ -23,6 +23,14 @@ hand-written in `test/integration/liquid_compat_test.exs`.
   `{% endif %}`, `{% for %}` / `{% else %}` / `{% endfor %}` with full
   `forloop` metadata (`index`, `index0`, `rindex`, `rindex0`, `first`,
   `last`, `length`).
+- **Unless** — `{% unless expr %}` / `{% else %}` / `{% endunless %}`,
+  desugared to a negated `{% if %}`. `{% elsif %}` inside an unless is a
+  parse error, matching Liquid.
+- **Case/when** — `{% case subject %}` with `{% when a, b, c %}` (multiple
+  values per when) and an optional `{% else %}`, terminated by
+  `{% endcase %}`. Matching uses the same `==` semantics as `{% if %}`.
+- **Capture** — `{% capture x %}...{% endcapture %}` renders its body into a
+  flattened string stored in `x`, with the same visibility as `{% assign %}`.
 - **Loop control** — `{% break %}` and `{% continue %}` inside a `{% for %}`
   body; both are parse errors anywhere else. `break` in a nested loop exits
   only the innermost loop.

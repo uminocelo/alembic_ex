@@ -113,6 +113,51 @@ defmodule Alembic.Integration.LiquidCompatTest do
     end
   end
 
+  describe "unless tag" do
+    test "renders body on a falsy condition, else otherwise" do
+      assert {:ok, "no"} = render("{% unless x %}no{% else %}yes{% endunless %}", %{})
+      assert {:ok, "yes"} = render("{% unless x %}no{% else %}yes{% endunless %}", %{"x" => true})
+    end
+
+    test "0 is truthy, so the unless body does not render" do
+      assert {:ok, "yes"} = render("{% unless n %}no{% else %}yes{% endunless %}", %{"n" => 0})
+    end
+
+    test "elsif inside an unless is rejected at parse time" do
+      assert {:error, {:parser, {:if_elsif_in_unless, _pos}}} =
+               render("{% unless x %}a{% elsif y %}b{% endunless %}")
+    end
+  end
+
+  describe "case tag" do
+    test "multi-value when and else fallthrough" do
+      template = "{% case x %}{% when 1, 2 %}low{% else %}high{% endcase %}"
+      assert {:ok, "low"} = render(template, %{"x" => 2})
+      assert {:ok, "high"} = render(template, %{"x" => 9})
+    end
+
+    test "no match and no else renders empty" do
+      assert {:ok, ""} = render("{% case x %}{% when 1 %}one{% endcase %}", %{"x" => 5})
+    end
+
+    test "else before any when is rejected at parse time" do
+      assert {:error, {:parser, {:else_before_when, _pos}}} =
+               render("{% case x %}{% else %}e{% when 1 %}a{% endcase %}")
+    end
+  end
+
+  describe "capture tag" do
+    test "captures rendered body and outputs it later" do
+      template = "{% capture x %}Hi {{ name }}{% endcapture %}[{{ x }}]"
+      assert {:ok, "[Hi Al]"} = render(template, %{"name" => "Al"})
+    end
+
+    test "filters apply to a captured variable" do
+      template = "{% capture x %}hi{% endcapture %}{{ x | upcase }}"
+      assert {:ok, "HI"} = render(template, %{})
+    end
+  end
+
   describe "filters" do
     test "all built-in filters handle nil input without crashing" do
       assert {:ok, ""} = render("{{ x | upcase }}", %{})

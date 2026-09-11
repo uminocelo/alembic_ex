@@ -13,6 +13,7 @@ mix run examples/06_includes/run.exs
 mix run examples/07_render_file/run.exs
 mix run examples/08_error_handling.exs
 mix run examples/09_loop_control.exs
+mix run examples/10_block_tags.exs
 ```
 
 | Script | What it shows |
@@ -26,6 +27,7 @@ mix run examples/09_loop_control.exs
 | [`07_render_file/`](07_render_file/) | `render_file/3`, the compiled-AST cache, `cache: false` |
 | [`08_error_handling.exs`](08_error_handling.exs) | `{:error, {stage, reason}}` shapes, `strict: true`, bang-variant exceptions |
 | [`09_loop_control.exs`](09_loop_control.exs) | `{% break %}`/`{% continue %}`, `{% cycle %}` (unnamed and named groups), `(from..to)` range iterables |
+| [`10_block_tags.exs`](10_block_tags.exs) | `{% capture %}`, `{% unless %}`, `{% case %}`/`{% when %}` |
 
 You'll see a one-line warning at startup:
 

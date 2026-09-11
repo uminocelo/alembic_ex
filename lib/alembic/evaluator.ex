@@ -119,6 +119,36 @@ defmodule Alembic.Evaluator do
   defp eval_node({:break}, ctx), do: {:break, "", ctx}
   defp eval_node({:continue}, ctx), do: {:continue, "", ctx}
 
+  # Capture renders its body into a flattened binary and stores it in assigns,
+  # exactly like `{% assign %}`. Any control flow escaping the body
+  # ({:break}/{:continue}) propagates outward unchanged rather than being
+  # captured.
+  defp eval_node({:capture, var, body}, ctx) do
+    case eval_nodes(body, ctx) do
+      {:ok, iolist, body_ctx} ->
+        {:ok, "", Context.assign(body_ctx, var, IO.iodata_to_binary(iolist))}
+
+      {:break, iolist, body_ctx} ->
+        {:break, iolist, body_ctx}
+
+      {:continue, iolist, body_ctx} ->
+        {:continue, iolist, body_ctx}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp eval_node({:case, subject_expr, whens, else_branch}, ctx) do
+    with {:ok, subject} <- eval_expr(subject_expr, ctx) do
+      case find_matching_when(whens, subject, ctx) do
+        {:ok, nil} -> eval_optional_branch(else_branch, ctx)
+        {:ok, body} -> eval_nodes(body, ctx)
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
   defp eval_node({:cycle, group, value_exprs}, ctx) do
     key = cycle_key(group, value_exprs)
     index = Map.get(ctx.cycles, key, 0)
@@ -167,6 +197,33 @@ defmodule Alembic.Evaluator do
 
   defp eval_optional_branch(nil, ctx), do: {:ok, "", ctx}
   defp eval_optional_branch(branch, ctx), do: eval_nodes(branch, ctx)
+
+  # The subject is evaluated once by the caller; each when's values are then
+  # compared against it with the evaluator's existing `==` semantics (see
+  # compare/3). First matching when wins; `nil` means no when matched.
+  defp find_matching_when([], _subject, _ctx), do: {:ok, nil}
+
+  defp find_matching_when([{value_exprs, body} | rest], subject, ctx) do
+    case any_value_matches?(value_exprs, subject, ctx) do
+      {:ok, true} -> {:ok, body}
+      {:ok, false} -> find_matching_when(rest, subject, ctx)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp any_value_matches?([], _subject, _ctx), do: {:ok, false}
+
+  defp any_value_matches?([expr | rest], subject, ctx) do
+    case eval_expr(expr, ctx) do
+      {:ok, value} ->
+        if compare(:eq, subject, value),
+          do: {:ok, true},
+          else: any_value_matches?(rest, subject, ctx)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
 
   defp cycle_key(nil, value_exprs), do: {:unnamed, value_exprs}
   defp cycle_key(group, _value_exprs), do: {:named, group}

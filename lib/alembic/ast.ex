@@ -25,6 +25,8 @@ defmodule Alembic.AST do
   | `break_node()` | `{:break}` | `{% break %}` |
   | `continue_node()` | `{:continue}` | `{% continue %}` |
   | `cycle_node()` | `{:cycle, group, values}` | `{% cycle "a", "b" %}` |
+  | `capture_node()` | `{:capture, var, body}` | `{% capture x %}...{% endcapture %}` |
+  | `case_node()` | `{:case, subject, whens, else}` | `{% case x %}...{% endcase %}` |
 
   ## Worked example
 
@@ -96,6 +98,8 @@ defmodule Alembic.AST do
   @type break_node :: {:break}
   @type continue_node :: {:continue}
   @type cycle_node :: {:cycle, String.t() | nil, [expr()]}
+  @type capture_node :: {:capture, String.t(), [ast_node()]}
+  @type case_node :: {:case, expr(), [{[expr()], [ast_node()]}], [ast_node()] | nil}
   @type ast_node ::
           text_node()
           | output_node()
@@ -108,5 +112,7 @@ defmodule Alembic.AST do
           | break_node()
           | continue_node()
           | cycle_node()
+          | capture_node()
+          | case_node()
   @type t :: [ast_node()]
 end

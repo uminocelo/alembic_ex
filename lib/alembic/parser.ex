@@ -46,6 +46,11 @@ defmodule Alembic.Parser do
           | {:break_outside_loop, Token.position()}
           | {:continue_outside_loop, Token.position()}
           | {:malformed_cycle, term()}
+          | {:malformed_capture, term()}
+          | {:malformed_case, term()}
+          | {:malformed_when, term()}
+          | {:if_elsif_in_unless, Token.position()}
+          | {:else_before_when, Token.position()}
 
   @doc """
   Turns a token list (from `Alembic.Lexer.tokenize/1`) into an
@@ -223,6 +228,10 @@ defmodule Alembic.Parser do
   defp stopping_token?({:tag, "endif", _strip_left, _strip_right, _pos}), do: true
   defp stopping_token?({:tag, "endfor", _strip_left, _strip_right, _pos}), do: true
   defp stopping_token?({:tag, "endblock", _strip_left, _strip_right, _pos}), do: true
+  defp stopping_token?({:tag, "endcapture", _strip_left, _strip_right, _pos}), do: true
+  defp stopping_token?({:tag, "endunless", _strip_left, _strip_right, _pos}), do: true
+  defp stopping_token?({:tag, "endcase", _strip_left, _strip_right, _pos}), do: true
+  defp stopping_token?({:tag, "when " <> _rest, _strip_left, _strip_right, _pos}), do: true
   defp stopping_token?({:tag, "elsif " <> _rest, _strip_left, _strip_right, _pos}), do: true
   defp stopping_token?(_token), do: false
 
@@ -276,6 +285,18 @@ defmodule Alembic.Parser do
   defp dispatch_tag("include " <> raw, rest, _pos, _in_loop?), do: parse_include(raw, rest)
   defp dispatch_tag("cycle", _rest, _pos, _in_loop?), do: {:error, {:malformed_cycle, :empty}}
   defp dispatch_tag("cycle " <> spec, rest, _pos, _in_loop?), do: parse_cycle(spec, rest)
+
+  defp dispatch_tag("capture " <> name, rest, pos, in_loop?),
+    do: parse_capture(String.trim(name), rest, pos, in_loop?)
+
+  defp dispatch_tag("capture", _rest, _pos, _in_loop?), do: {:error, {:malformed_capture, :empty}}
+
+  defp dispatch_tag("unless " <> condition_raw, rest, pos, in_loop?),
+    do: parse_unless(condition_raw, rest, pos, in_loop?)
+
+  defp dispatch_tag("case " <> subject_raw, rest, pos, in_loop?),
+    do: parse_case(subject_raw, rest, pos, in_loop?)
+
   defp dispatch_tag(other, _rest, _pos, _in_loop?), do: {:error, {:unexpected_tag, other}}
 
   # ---- If / elsif* / else? / endif ----
@@ -322,6 +343,86 @@ defmodule Alembic.Parser do
     case String.split(spec, " in ", parts: 2) do
       [var_name, iterable_raw] -> {:ok, String.trim(var_name), iterable_raw}
       _other -> {:error, {:malformed_for, spec}}
+    end
+  end
+
+  # ---- Capture - name / body / endcapture ----
+
+  # The grammar declares the capture name as a single IDENT, so validate it
+  # with the expression parser rather than accepting any trimmed string —
+  # otherwise `{% capture foo.bar %}` would store a value under a key no
+  # output path can resolve.
+  defp parse_capture(name, tokens, pos, in_loop?) do
+    case Expression.parse(name) do
+      {:ok, {:variable, [name]}} ->
+        with {:ok, body, rest} <- parse_template(tokens, [], in_loop?),
+             {:ok, rest2} <- expect_tag(rest, "endcapture", pos) do
+          {:ok, {:capture, name, body}, rest2}
+        end
+
+      _other ->
+        {:error, {:malformed_capture, name}}
+    end
+  end
+
+  # ---- Unless: desugars to {:if, {:not, cond}, body, [], else} ----
+
+  defp parse_unless(condition_raw, tokens, pos, in_loop?) do
+    with {:ok, condition} <- Expression.parse(condition_raw),
+         {:ok, then_branch, rest} <- parse_template(tokens, [], in_loop?) do
+      parse_unless_tail({:not, condition}, then_branch, rest, pos, in_loop?)
+    end
+  end
+
+  defp parse_unless_tail(
+         _condition,
+         _then_branch,
+         [{:tag, "elsif " <> _, _sl, _sr, elsif_pos} | _rest],
+         _pos,
+         _in_loop?
+       ) do
+    {:error, {:if_elsif_in_unless, elsif_pos}}
+  end
+
+  defp parse_unless_tail(condition, then_branch, rest, pos, in_loop?) do
+    with {:ok, else_branch, rest2} <- parse_optional_else(rest, in_loop?),
+         {:ok, rest3} <- expect_tag(rest2, "endunless", pos) do
+      {:ok, {:if, condition, then_branch, [], else_branch}, rest3}
+    end
+  end
+
+  # ---- Case subject / when* / else? / endcase ----
+
+  defp parse_case(subject_raw, tokens, pos, in_loop?) do
+    with {:ok, subject} <- Expression.parse(subject_raw),
+         {:ok, whens, rest} <- parse_case_whens(tokens, in_loop?, []),
+         {:ok, else_branch, rest2} <- parse_case_else(whens, rest, in_loop?),
+         {:ok, rest3} <- expect_tag(rest2, "endcase", pos) do
+      {:ok, {:case, subject, whens, else_branch}, rest3}
+    end
+  end
+
+  defp parse_case_whens([{:tag, "when " <> values_raw, _sl, _sr, _pos} | rest], in_loop?, acc) do
+    with {:ok, values} <- parse_when_values(values_raw),
+         {:ok, body, rest2} <- parse_template(rest, [], in_loop?) do
+      parse_case_whens(rest2, in_loop?, [{values, body} | acc])
+    end
+  end
+
+  defp parse_case_whens(tokens, _in_loop?, acc), do: {:ok, Enum.reverse(acc), tokens}
+
+  # An `{% else %}` with no preceding `{% when %}` is invalid — report it here
+  # rather than folding it into an empty-when case.
+  defp parse_case_else([], [{:tag, "else", _sl, _sr, else_pos} | _rest], _in_loop?) do
+    {:error, {:else_before_when, else_pos}}
+  end
+
+  defp parse_case_else(_whens, tokens, in_loop?), do: parse_optional_else(tokens, in_loop?)
+
+  defp parse_when_values(raw) do
+    case Expression.parse_list(raw) do
+      {:ok, values} -> {:ok, values}
+      {:error, reason} -> {:error, {:malformed_when, {String.trim(raw), reason}}}
     end
   end
 
@@ -474,19 +575,9 @@ defmodule Alembic.Parser do
   end
 
   defp parse_cycle_values(raw) do
-    raw
-    |> split_top_level_commas()
-    |> Enum.reduce_while({:ok, []}, fn part, {:ok, acc} ->
-      trimmed = String.trim(part)
-
-      case Expression.parse(trimmed) do
-        {:ok, expr} -> {:cont, {:ok, [expr | acc]}}
-        {:error, reason} -> {:halt, {:error, {:invalid_expression, trimmed, reason}}}
-      end
-    end)
-    |> case do
-      {:ok, values} -> {:ok, Enum.reverse(values)}
-      {:error, reason} -> {:error, reason}
+    case Expression.parse_list(raw) do
+      {:ok, values} -> {:ok, values}
+      {:error, reason} -> {:error, {:invalid_expression, String.trim(raw), reason}}
     end
   end
 
