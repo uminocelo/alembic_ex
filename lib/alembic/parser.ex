@@ -42,6 +42,8 @@ defmodule Alembic.Parser do
           | {:malformed_assign, term()}
           | {:malformed_extends, term()}
           | {:malformed_include, term()}
+          | {:malformed_cycle, term()}
+          | {:loop_control_outside_loop, String.t()}
           | {:unexpected_tag, String.t()}
 
   @doc """
@@ -61,7 +63,7 @@ defmodule Alembic.Parser do
   @spec parse([Token.t()]) :: {:ok, AST.t()} | {:error, reason()}
   def parse(tokens) when is_list(tokens) do
     case tokens |> apply_whitespace_control() |> parse_template() do
-      {:ok, nodes, []} -> validate_extends_position(nodes)
+      {:ok, nodes, []} -> validate_nodes(nodes)
       {:ok, _nodes, [token | _rest]} -> {:error, {:unexpected_token, token, Token.position(token)}}
       {:error, reason} -> {:error, reason}
     end
@@ -103,7 +105,7 @@ defmodule Alembic.Parser do
   def parse_all(tokens) when is_list(tokens) do
     {nodes, node_errors} = tokens |> apply_whitespace_control() |> collect_errors([], [])
 
-    case node_errors ++ extends_position_errors(nodes) do
+    case node_errors ++ extends_position_errors(nodes) ++ loop_control_errors(nodes) do
       [] -> {:ok, nodes}
       errors -> {:error, errors}
     end
@@ -115,6 +117,36 @@ defmodule Alembic.Parser do
       {:error, reason} -> [reason]
     end
   end
+
+  # `{% break %}` / `{% continue %}` are only meaningful inside a `{% for %}`
+  # body. Resolving that structurally, after the whole template is parsed, is
+  # simpler than threading an "in loop" flag through every `parse_template/2`
+  # call site (if/for/block bodies all recurse through the same function).
+  defp loop_control_errors(nodes), do: loop_control_errors(nodes, false)
+
+  defp loop_control_errors(nodes, in_loop) do
+    Enum.flat_map(nodes, &loop_control_node_errors(&1, in_loop))
+  end
+
+  defp loop_control_node_errors(:break, false), do: [{:loop_control_outside_loop, "break"}]
+  defp loop_control_node_errors(:continue, false), do: [{:loop_control_outside_loop, "continue"}]
+  defp loop_control_node_errors(:break, true), do: []
+  defp loop_control_node_errors(:continue, true), do: []
+
+  defp loop_control_node_errors({:if, _cond, then_branch, elsifs, else_branch}, in_loop) do
+    loop_control_errors(then_branch, in_loop) ++
+      Enum.flat_map(elsifs, fn {_cond, branch} -> loop_control_errors(branch, in_loop) end) ++
+      loop_control_errors(else_branch || [], in_loop)
+  end
+
+  defp loop_control_node_errors({:for, _var, _iterable, body, else_branch}, _in_loop) do
+    loop_control_errors(body, true) ++ loop_control_errors(else_branch || [], true)
+  end
+
+  defp loop_control_node_errors({:block, _name, body}, in_loop),
+    do: loop_control_errors(body, in_loop)
+
+  defp loop_control_node_errors(_other, _in_loop), do: []
 
   # ---- parse_all/1's error-collecting, best-effort-recovering walk ----
 
@@ -256,6 +288,10 @@ defmodule Alembic.Parser do
   defp dispatch_tag("extends " <> raw, rest, _pos), do: parse_extends(raw, rest)
   defp dispatch_tag("block " <> name, rest, pos), do: parse_block(String.trim(name), rest, pos)
   defp dispatch_tag("include " <> raw, rest, _pos), do: parse_include(raw, rest)
+  defp dispatch_tag("break", rest, _pos), do: {:ok, :break, rest}
+  defp dispatch_tag("continue", rest, _pos), do: {:ok, :continue, rest}
+  defp dispatch_tag("cycle " <> raw, rest, _pos), do: parse_cycle(raw, rest)
+  defp dispatch_tag("cycle", _rest, _pos), do: {:error, {:malformed_cycle, :empty}}
   defp dispatch_tag(other, _rest, _pos), do: {:error, {:unexpected_tag, other}}
 
   # ---- If / elsif* / else? / endif ----
@@ -288,7 +324,7 @@ defmodule Alembic.Parser do
 
   defp parse_for(spec, tokens, pos) do
     with {:ok, var_name, iterable_raw} <- split_for_spec(spec),
-         {:ok, iterable} <- Expression.parse(iterable_raw),
+         {:ok, iterable} <- Expression.parse_iterable(iterable_raw),
          {:ok, body, rest} <- parse_template(tokens),
          {:ok, else_branch, rest2} <- parse_optional_else(rest),
          {:ok, rest3} <- expect_tag(rest2, "endfor", pos) do
@@ -300,6 +336,41 @@ defmodule Alembic.Parser do
     case String.split(spec, " in ", parts: 2) do
       [var_name, iterable_raw] -> {:ok, String.trim(var_name), iterable_raw}
       _other -> {:error, {:malformed_for, spec}}
+    end
+  end
+
+  # ---- Cycle ----
+
+  defp parse_cycle(raw, tokens) do
+    case split_top_level_colon(raw) do
+      {group_raw, values_raw} ->
+        with {:ok, group} <- Expression.parse(group_raw),
+             {:ok, values} <- parse_cycle_values(values_raw) do
+          {:ok, {:cycle, group, values}, tokens}
+        else
+          {:error, reason} -> {:error, {:malformed_cycle, reason}}
+        end
+
+      nil ->
+        case parse_cycle_values(raw) do
+          {:ok, values} -> {:ok, {:cycle, nil, values}, tokens}
+          {:error, reason} -> {:error, {:malformed_cycle, reason}}
+        end
+    end
+  end
+
+  defp parse_cycle_values(raw) do
+    raw
+    |> split_top_level_commas()
+    |> Enum.reduce_while({:ok, []}, fn value_raw, {:ok, acc} ->
+      case Expression.parse(value_raw) do
+        {:ok, expr} -> {:cont, {:ok, [expr | acc]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, values} -> {:ok, Enum.reverse(values)}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -409,6 +480,29 @@ defmodule Alembic.Parser do
   defp iodata_to_string(reversed_chars),
     do: reversed_chars |> Enum.reverse() |> IO.iodata_to_binary()
 
+  # Splits on the first top-level (outside a string literal) `:` — used for the
+  # optional `{% cycle "name": ... %}` group prefix. Returns `{left, right}` or
+  # `nil` when there is no top-level colon.
+  defp split_top_level_colon(str), do: split_top_level_colon(str, "", nil)
+
+  defp split_top_level_colon("", _left, _quote), do: nil
+
+  defp split_top_level_colon(<<c::utf8, rest::binary>>, left, nil) when c in [?", ?'] do
+    split_top_level_colon(rest, left <> <<c::utf8>>, c)
+  end
+
+  defp split_top_level_colon(<<c::utf8, rest::binary>>, left, quote) when c == quote do
+    split_top_level_colon(rest, left <> <<c::utf8>>, nil)
+  end
+
+  defp split_top_level_colon(<<?:, rest::binary>>, left, nil) do
+    {String.trim(left), rest}
+  end
+
+  defp split_top_level_colon(<<c::utf8, rest::binary>>, left, quote) do
+    split_top_level_colon(rest, left <> <<c::utf8>>, quote)
+  end
+
   # ---- Shared helpers ----
 
   defp expect_tag([{:tag, content, _sl, _sr, _pos} | rest], name, open_pos) do
@@ -422,6 +516,16 @@ defmodule Alembic.Parser do
       nil -> {:ok, nodes}
       0 -> {:ok, nodes}
       _index -> {:error, :extends_not_first}
+    end
+  end
+
+  defp validate_nodes(nodes) do
+    with {:ok, nodes} <- validate_extends_position(nodes),
+         [] <- loop_control_errors(nodes) do
+      {:ok, nodes}
+    else
+      {:error, reason} -> {:error, reason}
+      [reason | _rest] -> {:error, reason}
     end
   end
 end

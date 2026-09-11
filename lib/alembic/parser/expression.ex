@@ -53,15 +53,69 @@ defmodule Alembic.Parser.Expression do
         {:error, :empty_expression}
 
       trimmed ->
-        with {:ok, tokens} <- tokenize(trimmed),
-             {:ok, expr, []} <- parse_or(tokens, true) do
-          {:ok, expr}
-        else
-          {:ok, _expr, [token | _rest]} -> {:error, {:unexpected_token, token}}
-          {:error, reason} -> {:error, reason}
+        with {:ok, tokens} <- tokenize(trimmed) do
+          parse_tokens(tokens)
         end
     end
   end
+
+  @doc """
+  Like `parse/1`, but additionally accepts an inline inclusive integer range
+  (e.g. `(1..5)`) as a whole expression. Ranges are only valid in a
+  `{% for %}` iterable position, so this entry point is used by the parser's
+  `parse_for/3` and nowhere else.
+
+  ## Examples
+
+      iex> Alembic.Parser.Expression.parse_iterable("(1..3)")
+      {:ok, {:range, {:literal, 1}, {:literal, 3}}}
+
+      iex> Alembic.Parser.Expression.parse_iterable("items")
+      {:ok, {:variable, ["items"]}}
+  """
+  @spec parse_iterable(String.t()) :: {:ok, AST.expr()} | {:error, reason()}
+  def parse_iterable(source) when is_binary(source) do
+    case String.trim(source) do
+      "" ->
+        {:error, :empty_expression}
+
+      trimmed ->
+        with {:ok, tokens} <- tokenize(trimmed) do
+          parse_iterable_tokens(tokens)
+        end
+    end
+  end
+
+  defp parse_iterable_tokens(tokens) do
+    case parse_range(tokens) do
+      {:ok, range, []} -> {:ok, range}
+      _other -> parse_tokens(tokens)
+    end
+  end
+
+  defp parse_tokens(tokens) do
+    case parse_or(tokens, true) do
+      {:ok, expr, []} -> {:ok, expr}
+      {:ok, _expr, [token | _rest]} -> {:error, {:unexpected_token, token}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # A range is only recognized as the entire iterable expression — it never
+  # nests inside a larger expression. The endpoints are parsed as primaries
+  # (integer literals or variables).
+  defp parse_range([:lparen | rest]) do
+    with {:ok, from, rest2} <- parse_primary(rest),
+         [:dotdot | rest3] <- rest2,
+         {:ok, to, rest4} <- parse_primary(rest3),
+         [:rparen | rest5] <- rest4 do
+      {:ok, {:range, from, to}, rest5}
+    else
+      _other -> :no_range
+    end
+  end
+
+  defp parse_range(_tokens), do: :no_range
 
   # ---- Recursive descent (precedence, low to high): or, and, not, comparison ----
   #
@@ -215,9 +269,12 @@ defmodule Alembic.Parser.Expression do
   defp tokenize("<=" <> rest, acc), do: tokenize(rest, [{:op, :lte} | acc])
   defp tokenize(">" <> rest, acc), do: tokenize(rest, [{:op, :gt} | acc])
   defp tokenize("<" <> rest, acc), do: tokenize(rest, [{:op, :lt} | acc])
+  defp tokenize(".." <> rest, acc), do: tokenize(rest, [:dotdot | acc])
   defp tokenize("." <> rest, acc), do: tokenize(rest, [:dot | acc])
   defp tokenize("[" <> rest, acc), do: tokenize(rest, [:lbracket | acc])
   defp tokenize("]" <> rest, acc), do: tokenize(rest, [:rbracket | acc])
+  defp tokenize("(" <> rest, acc), do: tokenize(rest, [:lparen | acc])
+  defp tokenize(")" <> rest, acc), do: tokenize(rest, [:rparen | acc])
   defp tokenize("|" <> rest, acc), do: tokenize(rest, [:pipe | acc])
   defp tokenize(":" <> rest, acc), do: tokenize(rest, [:colon | acc])
   defp tokenize("," <> rest, acc), do: tokenize(rest, [:comma | acc])

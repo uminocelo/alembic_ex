@@ -23,8 +23,7 @@ defmodule Alembic.Parser.ExpressionTest do
     end
 
     test "disallows empty path segments" do
-      assert {:error, {:unexpected_token, :expected_identifier_after_dot}} =
-               Expression.parse("user..name")
+      assert {:error, {:unexpected_token, :dotdot}} = Expression.parse("user..name")
     end
   end
 

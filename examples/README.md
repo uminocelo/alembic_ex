@@ -12,6 +12,7 @@ mix run examples/05_inheritance/run.exs
 mix run examples/06_includes/run.exs
 mix run examples/07_render_file/run.exs
 mix run examples/08_error_handling.exs
+mix run examples/09_loop_control.exs
 ```
 
 | Script | What it shows |
@@ -24,6 +25,7 @@ mix run examples/08_error_handling.exs
 | [`06_includes/`](06_includes/) | `{% include %}` with `with`, and implicit scope sharing |
 | [`07_render_file/`](07_render_file/) | `render_file/3`, the compiled-AST cache, `cache: false` |
 | [`08_error_handling.exs`](08_error_handling.exs) | `{:error, {stage, reason}}` shapes, `strict: true`, bang-variant exceptions |
+| [`09_loop_control.exs`](09_loop_control.exs) | `{% break %}`/`{% continue %}`, `{% cycle %}` (unnamed and named groups), `(from..to)` range iterables |
 
 You'll see a one-line warning at startup:
 

@@ -22,6 +22,9 @@ defmodule Alembic.AST do
   | `extends_node()` | `{:extends, name}` | `{% extends "base.html" %}` |
   | `block_node()` | `{:block, name, body}` | `{% block title %}...{% endblock %}` |
   | `include_node()` | `{:include, name, vars}` | `{% include "header.html" %}` |
+  | `break_node()` | `:break` | `{% break %}` |
+  | `continue_node()` | `:continue` | `{% continue %}` |
+  | `cycle_node()` | `{:cycle, group, values}` | `{% cycle "a", "b" %}` |
 
   ## Worked example
 
@@ -60,6 +63,7 @@ defmodule Alembic.AST do
   | `{:compare, op, left, right}` | comparison | `x > 0` |
   | `{:logical, op, left, right}` | `and`/`or` | `a and b` |
   | `{:not, expr}` | negation | `not x` |
+  | `{:range, from, to}` | inclusive integer range | `(1..5)` |
 
   Output tags (`output_node()`) require a bare variable-path base,
   optionally wrapped in a filter chain — a literal base like
@@ -79,6 +83,7 @@ defmodule Alembic.AST do
           | {:compare, compare_op(), expr(), expr()}
           | {:logical, logical_op(), expr(), expr()}
           | {:not, expr()}
+          | {:range, expr(), expr()}
   @type filter :: {:filter, String.t(), [expr()]}
   @type text_node :: {:text, String.t()}
   @type output_node :: {:output, path(), [filter()]}
@@ -88,6 +93,9 @@ defmodule Alembic.AST do
   @type extends_node :: {:extends, String.t()}
   @type block_node :: {:block, String.t(), [ast_node()]}
   @type include_node :: {:include, String.t(), map()}
+  @type break_node :: :break
+  @type continue_node :: :continue
+  @type cycle_node :: {:cycle, expr() | nil, [expr()]}
   @type ast_node ::
           text_node()
           | output_node()
@@ -97,5 +105,8 @@ defmodule Alembic.AST do
           | extends_node()
           | block_node()
           | include_node()
+          | break_node()
+          | continue_node()
+          | cycle_node()
   @type t :: [ast_node()]
 end

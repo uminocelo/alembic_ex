@@ -169,6 +169,73 @@ defmodule Alembic.ParserTest do
     end
   end
 
+  describe "break and continue" do
+    test "break inside a for body parses to :break" do
+      assert {:ok, [{:for, "x", _it, [:break], nil}]} =
+               parse("{% for x in xs %}{% break %}{% endfor %}")
+    end
+
+    test "continue inside a for body parses to :continue" do
+      assert {:ok, [{:for, "x", _it, [:continue], nil}]} =
+               parse("{% for x in xs %}{% continue %}{% endfor %}")
+    end
+
+    test "allowed inside an if nested in a for" do
+      assert {:ok, [{:for, _var, _it, [{:if, _c, [:break], [], nil}], nil}]} =
+               parse("{% for x in xs %}{% if x %}{% break %}{% endif %}{% endfor %}")
+    end
+
+    test "break at top level is a parse error" do
+      assert {:error, {:loop_control_outside_loop, "break"}} = parse("{% break %}")
+    end
+
+    test "continue at top level is a parse error" do
+      assert {:error, {:loop_control_outside_loop, "continue"}} = parse("{% continue %}")
+    end
+  end
+
+  describe "cycle tag" do
+    test "unnamed cycle parses values" do
+      assert {:ok, [{:cycle, nil, [{:literal, "odd"}, {:literal, "even"}]}]} =
+               parse(~s({% cycle "odd", "even" %}))
+    end
+
+    test "named cycle keeps the group expression" do
+      assert {:ok, [{:cycle, {:literal, "rows"}, [{:literal, "a"}, {:literal, "b"}]}]} =
+               parse(~s({% cycle "rows": "a", "b" %}))
+    end
+
+    test "values may be variable expressions" do
+      assert {:ok, [{:cycle, nil, [{:variable, ["a"]}, {:variable, ["b"]}]}]} =
+               parse("{% cycle a, b %}")
+    end
+
+    test "cycle with no arguments is a parse error" do
+      assert {:error, {:malformed_cycle, :empty}} = parse("{% cycle %}")
+    end
+  end
+
+  describe "range iterables" do
+    test "literal range in a for iterable position" do
+      assert {:ok, [{:for, "i", {:range, {:literal, 1}, {:literal, 5}}, _body, nil}]} =
+               parse("{% for i in (1..5) %}{{ i }}{% endfor %}")
+    end
+
+    test "range endpoints may be variables" do
+      assert {:ok, [{:for, "i", {:range, {:variable, ["a"]}, {:variable, ["b"]}}, _body, nil}]} =
+               parse("{% for i in (a..b) %}{{ i }}{% endfor %}")
+    end
+
+    test "a range outside a for-iterable position is a parse error" do
+      assert {:error, {:invalid_expression, _raw, _reason}} = parse("{{ (1..5) }}")
+    end
+
+    test "a range in an if condition is a parse error" do
+      assert {:error, {:unexpected_token, :lparen}} =
+               parse("{% if (1..5) %}x{% endif %}")
+    end
+  end
+
   describe "errors" do
     test "unexpected trailing token" do
       assert {:error, {:unexpected_token, {:tag, "endif", false, false, _tok_pos}, _err_pos}} =

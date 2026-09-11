@@ -9,7 +9,7 @@ defmodule Alembic.Context do
   """
 
   @enforce_keys [:scopes]
-  defstruct scopes: [], assigns: %{}, strict: false, loader_fn: nil, custom_filters: []
+  defstruct scopes: [], assigns: %{}, strict: false, loader_fn: nil, custom_filters: [], cycles: %{}
 
   @type loader_fn :: (String.t() -> {:ok, String.t()} | {:error, term()})
   @type t :: %__MODULE__{
@@ -17,7 +17,8 @@ defmodule Alembic.Context do
           assigns: map(),
           strict: boolean(),
           loader_fn: loader_fn() | nil,
-          custom_filters: [module()]
+          custom_filters: [module()],
+          cycles: map()
         }
 
   @doc """
@@ -179,6 +180,29 @@ defmodule Alembic.Context do
   @spec assign(t(), String.t(), any()) :: t()
   def assign(%__MODULE__{assigns: assigns} = ctx, key, value) do
     %{ctx | assigns: Map.put(assigns, key, value)}
+  end
+
+  @doc """
+  Advances the round-robin counter for one `{% cycle %}` group and returns the
+  value index the caller should render, plus the updated context. State is
+  keyed by `key`, so two cycles sharing a group name advance together while
+  distinct groups stay independent. Lives on the context (not in a scope),
+  so it survives `push_scope/2`/`pop_scope/1` and never leaks between separate
+  `render/3` calls.
+
+  ## Examples
+
+      iex> ctx = Alembic.Context.new(%{})
+      iex> {index, ctx} = Alembic.Context.next_cycle(ctx, :group, 2)
+      iex> {next_index, _ctx} = Alembic.Context.next_cycle(ctx, :group, 2)
+      iex> {index, next_index}
+      {0, 1}
+  """
+  @spec next_cycle(t(), term(), pos_integer()) :: {non_neg_integer(), t()}
+  def next_cycle(%__MODULE__{cycles: cycles} = ctx, key, length)
+      when is_integer(length) and length > 0 do
+    index = Map.get(cycles, key, 0)
+    {rem(index, length), %{ctx | cycles: Map.put(cycles, key, index + 1)}}
   end
 
   @doc """

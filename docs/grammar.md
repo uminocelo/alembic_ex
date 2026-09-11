@@ -23,6 +23,9 @@ node         = text
              | block
              | extends
              | include
+             | break
+             | continue
+             | cycle
              ;
 
 (* Literal text passthrough. Never contains a raw "{{" or "{%" — those always
@@ -48,11 +51,16 @@ if_block     = TAG_OPEN , "if" , expr , TAG_CLOSE
                ;
 
 (* For loop: for var in iterable *)
-for_block    = TAG_OPEN , "for" , IDENT , "in" , expr , TAG_CLOSE
+for_block    = TAG_OPEN , "for" , IDENT , "in" , iterable , TAG_CLOSE
                , template
                , [ TAG_OPEN , "else" , TAG_CLOSE , template ]
                , TAG_OPEN , "endfor" , TAG_CLOSE
                ;
+
+(* A for-iterable is any expression, or an inline inclusive integer range.
+   Ranges are only legal here, never in a general expression position. *)
+iterable     = range | expr ;
+range        = "(" , expr , ".." , expr , ")" ;
 
 (* Variable assignment *)
 assign       = TAG_OPEN , "assign" , IDENT , "=" , expr , TAG_CLOSE ;
@@ -72,6 +80,13 @@ include      = TAG_OPEN , "include" , STRING
 
 variable_list = assignment_pair , { "," , assignment_pair } ;
 assignment_pair = IDENT , ":" , expr ;
+
+(* Loop control: only valid inside a for_block body. *)
+break        = TAG_OPEN , "break" , TAG_CLOSE ;
+continue     = TAG_OPEN , "continue" , TAG_CLOSE ;
+
+(* Cycle: one or more values, with an optional named group prefix. *)
+cycle        = TAG_OPEN , "cycle" , [ STRING , ":" ] , expr , { "," , expr } , TAG_CLOSE ;
 
 (* Terminals produced by the Lexer (Alembic.Token) *)
 TEXT_TOKEN   = (* any run of characters not starting a Liquid delimiter *) ;
@@ -129,6 +144,7 @@ Each production maps onto exactly one `Alembic.AST.expr()` shape:
 | `comparison` (with `compare_op`) | `{:compare, op, left, right}` |
 | `and_expr` / `or_expr` | `{:logical, :and \| :or, left, right}` |
 | `not_expr` (with `not`) | `{:not, expr}` |
+| `range` (iterable position only) | `{:range, from_expr, to_expr}` |
 | `filter` | `{:filter, name, args}` — `args :: [expr()]` |
 
 Top-level node productions map onto `Alembic.AST.ast_node()` shapes:
@@ -143,6 +159,9 @@ Top-level node productions map onto `Alembic.AST.ast_node()` shapes:
 | `extends` | `{:extends, template_name}` |
 | `block` | `{:block, name, body}` |
 | `include` | `{:include, template_name, variables}` |
+| `break` | `:break` |
+| `continue` | `:continue` |
+| `cycle` | `{:cycle, group, values}` — `group :: expr() \| nil`, `values :: [expr()]` |
 
 ---
 
