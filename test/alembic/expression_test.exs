@@ -23,7 +23,8 @@ defmodule Alembic.Parser.ExpressionTest do
     end
 
     test "disallows empty path segments" do
-      assert {:error, {:unexpected_token, :dotdot}} = Expression.parse("user..name")
+      assert {:error, {:unexpected_token, :dotdot}} =
+               Expression.parse("user..name")
     end
   end
 
@@ -170,6 +171,33 @@ defmodule Alembic.Parser.ExpressionTest do
 
     test "bare variable with no filters is not wrapped" do
       assert {:ok, {:variable, ["name"]}} = Expression.parse("name")
+    end
+  end
+
+  describe "ranges" do
+    test "literal range with allow_ranges" do
+      assert {:ok, {:range, {:literal, 1}, {:literal, 5}}} = Expression.parse("(1..5)", true)
+    end
+
+    test "range with variable endpoints" do
+      assert {:ok, {:range, {:variable, ["start"]}, {:variable, ["end"]}}} =
+               Expression.parse("(start..end)", true)
+    end
+
+    test "range not allowed by default" do
+      assert {:error, :range_not_allowed} = Expression.parse("(1..5)")
+    end
+
+    test "range not allowed in filter args even with allow_ranges" do
+      assert {:error, :range_not_allowed} = Expression.parse("x | f: (1..5)", true)
+    end
+
+    test "malformed range missing dotdot" do
+      assert {:error, _} = Expression.parse("(1 5)", true)
+    end
+
+    test "malformed range missing rparen" do
+      assert {:error, _} = Expression.parse("(1..5", true)
     end
   end
 

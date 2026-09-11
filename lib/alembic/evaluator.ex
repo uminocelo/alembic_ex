@@ -36,8 +36,7 @@ defmodule Alembic.Evaluator do
           | {:include_not_found, String.t(), term()}
           | :include_loader_not_configured
           | {:include_compile_error, term()}
-          | {:invalid_range_endpoints, term()}
-          | {:loop_control_outside_loop, :break | :continue}
+          | {:range_non_integer, term(), term()}
           | Filters.reason()
 
   @doc """
@@ -59,21 +58,24 @@ defmodule Alembic.Evaluator do
   def eval(nodes, %Context{} = ctx) when is_list(nodes) do
     case eval_nodes(nodes, ctx) do
       {:ok, iolist, _ctx} -> {:ok, IO.iodata_to_binary(iolist)}
-      {:control, kind, _ctx} -> {:error, {:loop_control_outside_loop, kind}}
+      {:break, iolist, _ctx} -> {:ok, IO.iodata_to_binary(iolist)}
+      {:continue, iolist, _ctx} -> {:ok, IO.iodata_to_binary(iolist)}
       {:error, reason} -> {:error, reason}
     end
   end
 
-  # Returns {:ok, iodata, new_ctx} | {:control, kind, new_ctx} | {:error,
-  # reason} — every eval_node/2 clause returns this same shape so assign's
-  # context change threads through the fold below to every sibling node that
-  # follows it. A :control result (`{% break %}` / `{% continue %}`) halts the
-  # fold immediately and propagates up to the nearest enclosing for-loop.
+  # Returns {:ok, iodata, new_ctx} | {:break, iodata, new_ctx} |
+  # {:continue, iodata, new_ctx} | {:error, reason} — every eval_node/2
+  # clause returns this same shape so assign's context change threads
+  # through the fold below to every sibling node that follows it.
+  # {:break}/{:continue} propagate up from inside a for body to the
+  # enclosing eval_for_items, which interprets and consumes them.
   defp eval_nodes(nodes, ctx) do
     Enum.reduce_while(nodes, {:ok, [], ctx}, fn node, {:ok, acc, ctx} ->
       case eval_node(node, ctx) do
         {:ok, chunk, new_ctx} -> {:cont, {:ok, [acc, chunk], new_ctx}}
-        {:control, kind, new_ctx} -> {:halt, {:control, kind, new_ctx}}
+        {:break, chunk, new_ctx} -> {:halt, {:break, [acc, chunk], new_ctx}}
+        {:continue, chunk, new_ctx} -> {:halt, {:continue, [acc, chunk], new_ctx}}
         {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
@@ -114,6 +116,20 @@ defmodule Alembic.Evaluator do
     end
   end
 
+  defp eval_node({:break}, ctx), do: {:break, "", ctx}
+  defp eval_node({:continue}, ctx), do: {:continue, "", ctx}
+
+  defp eval_node({:cycle, group, value_exprs}, ctx) do
+    key = cycle_key(group, value_exprs)
+    index = Map.get(ctx.cycles, key, 0)
+
+    with {:ok, values} <- eval_cycle_values(value_exprs, ctx) do
+      value = Enum.at(values, rem(index, length(values)))
+      new_ctx = %{ctx | cycles: Map.put(ctx.cycles, key, index + 1)}
+      {:ok, to_output_string(value), new_ctx}
+    end
+  end
+
   defp eval_node({:include, name, variables}, ctx) do
     with {:ok, loader_fn} <- require_loader(ctx),
          {:ok, source} <- call_loader(loader_fn, name),
@@ -122,20 +138,18 @@ defmodule Alembic.Evaluator do
       include_ctx = Context.push_scope(ctx, resolved_vars)
 
       case eval_nodes(ast, include_ctx) do
-        {:ok, chunk, new_include_ctx} -> {:ok, chunk, Context.pop_scope(new_include_ctx)}
-        {:error, reason} -> {:error, reason}
+        {:ok, chunk, new_include_ctx} ->
+          {:ok, chunk, Context.pop_scope(new_include_ctx)}
+
+        {:break, chunk, new_include_ctx} ->
+          {:break, chunk, Context.pop_scope(new_include_ctx)}
+
+        {:continue, chunk, new_include_ctx} ->
+          {:continue, chunk, Context.pop_scope(new_include_ctx)}
+
+        {:error, reason} ->
+          {:error, reason}
       end
-    end
-  end
-
-  defp eval_node(:break, ctx), do: {:control, :break, ctx}
-  defp eval_node(:continue, ctx), do: {:control, :continue, ctx}
-
-  defp eval_node({:cycle, group_expr, value_exprs}, ctx) do
-    with {:ok, values} <- eval_args(value_exprs, ctx),
-         {:ok, key} <- cycle_key(group_expr, values, ctx) do
-      {index, new_ctx} = Context.next_cycle(ctx, key, length(values))
-      {:ok, to_output_string(Enum.at(values, index)), new_ctx}
     end
   end
 
@@ -154,6 +168,22 @@ defmodule Alembic.Evaluator do
   defp eval_optional_branch(nil, ctx), do: {:ok, "", ctx}
   defp eval_optional_branch(branch, ctx), do: eval_nodes(branch, ctx)
 
+  defp cycle_key(nil, value_exprs), do: {:unnamed, value_exprs}
+  defp cycle_key(group, _value_exprs), do: {:named, group}
+
+  defp eval_cycle_values(value_exprs, ctx) do
+    Enum.reduce_while(value_exprs, {:ok, []}, fn expr, {:ok, acc} ->
+      case eval_expr(expr, ctx) do
+        {:ok, value} -> {:cont, {:ok, [value | acc]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, values} -> {:ok, Enum.reverse(values)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   defp eval_for_items(items, var, body, ctx) do
     length = Enum.count(items)
 
@@ -167,29 +197,16 @@ defmodule Alembic.Evaluator do
         {:ok, chunk, new_iter_ctx} ->
           {:cont, {:ok, [acc, chunk], Context.pop_scope(new_iter_ctx)}}
 
-        {:control, :continue, new_iter_ctx} ->
-          {:cont, {:ok, acc, Context.pop_scope(new_iter_ctx)}}
+        {:break, chunk, new_iter_ctx} ->
+          {:halt, {:ok, [acc, chunk], Context.pop_scope(new_iter_ctx)}}
 
-        {:control, :break, new_iter_ctx} ->
-          {:halt, {:ok, acc, Context.pop_scope(new_iter_ctx)}}
+        {:continue, chunk, new_iter_ctx} ->
+          {:cont, {:ok, [acc, chunk], Context.pop_scope(new_iter_ctx)}}
 
         {:error, reason} ->
           {:halt, {:error, reason}}
       end
     end)
-  end
-
-  # Unnamed cycles are keyed by their evaluated argument list; named cycles by
-  # their evaluated group value — so `{% cycle "rows": ... %}` calls sharing a
-  # name advance together, while two argument-identical unnamed cycles also
-  # share state (matching Liquid, which keys unnamed cycles by their args).
-  defp cycle_key(nil, values, _ctx), do: {:ok, {:cycle_values, values}}
-
-  defp cycle_key(group_expr, _values, ctx) do
-    case eval_expr(group_expr, ctx) do
-      {:ok, value} -> {:ok, {:cycle_group, value}}
-      {:error, reason} -> {:error, reason}
-    end
   end
 
   defp coerce_to_list(value) when is_list(value), do: value
@@ -277,20 +294,18 @@ defmodule Alembic.Evaluator do
   defp eval_expr({:range, from_expr, to_expr}, ctx) do
     with {:ok, from} <- eval_expr(from_expr, ctx),
          {:ok, to} <- eval_expr(to_expr, ctx) do
-      build_range(from, to)
+      case {from, to} do
+        {f, t} when is_integer(f) and is_integer(t) and f <= t ->
+          {:ok, Enum.to_list(f..t//1)}
+
+        {f, t} when is_integer(f) and is_integer(t) ->
+          {:ok, []}
+
+        _ ->
+          {:error, {:range_non_integer, from, to}}
+      end
     end
   end
-
-  # Inclusive when ascending, matching Liquid. A descending range iterates
-  # zero times (triggering `{% else %}`), unlike Elixir's own descending
-  # ranges; non-integer endpoints are an error rather than a silent empty loop.
-  defp build_range(from, to) when is_integer(from) and is_integer(to) and from <= to do
-    {:ok, Enum.to_list(from..to)}
-  end
-
-  defp build_range(from, to) when is_integer(from) and is_integer(to), do: {:ok, []}
-
-  defp build_range(from, to), do: {:error, {:invalid_range_endpoints, {from, to}}}
 
   defp eval_filter_list(filters, ctx) do
     Enum.reduce_while(filters, {:ok, []}, fn {:filter, name, arg_exprs}, {:ok, acc} ->

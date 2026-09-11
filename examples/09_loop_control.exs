@@ -82,13 +82,13 @@ IO.puts("descending:   #{output}")
 
 # The parser rejects loop-control tags outside a loop, and a range with a
 # non-integer endpoint fails at render time.
-{:error, {:parser, {:loop_control_outside_loop, "break"}}} =
+{:error, {:parser, {:break_outside_loop, %{line: 1, col: 1}}}} =
   Alembic.render_string("{% break %}", %{})
 
 IO.puts("outside loop: rejected")
 # => outside loop: rejected
 
-{:error, {:evaluator, {:invalid_range_endpoints, {1, "nope"}}}} =
+{:error, {:evaluator, {:range_non_integer, 1, "nope"}}} =
   Alembic.render_string("{% for i in (1..stop) %}{{ i }}{% endfor %}", %{"stop" => "nope"})
 
 IO.puts("bad range:    rejected")

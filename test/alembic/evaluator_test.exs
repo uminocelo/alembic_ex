@@ -217,6 +217,134 @@ defmodule Alembic.EvaluatorTest do
     end
   end
 
+  describe "break and continue" do
+    test "break stops the loop, emitting only preceding output" do
+      assert {:ok, "ab"} =
+               render(
+                 "{% for i in items %}{{ i }}{% if i == \"b\" %}{% break %}{% endif %}{% endfor %}",
+                 %{"items" => ["a", "b", "c"]}
+               )
+    end
+
+    test "continue skips the rest of the current iteration" do
+      assert {:ok, "ac"} =
+               render(
+                 "{% for i in items %}{% if i == \"b\" %}{% continue %}{% endif %}{{ i }}{% endfor %}",
+                 %{"items" => ["a", "b", "c"]}
+               )
+    end
+
+    test "break in a nested loop exits only the innermost loop" do
+      template = """
+      {% for o in outer %}{% for i in inner %}{% if i == 2 %}{% break %}{% endif %}{{ o }}{{ i }}{% endfor %}{% endfor %}\
+      """
+
+      assert {:ok, "a1b1c1"} = render(template, %{"outer" => ["a", "b", "c"], "inner" => [1, 2, 3]})
+    end
+
+    test "continue in a nested loop skips only the innermost iteration" do
+      template = """
+      {% for o in outer %}{% for i in inner %}{% if i == 2 %}{% continue %}{% endif %}{{ o }}{{ i }}{% endfor %}{% endfor %}\
+      """
+
+      assert {:ok, "a1a3b1b3c1c3"} =
+               render(template, %{"outer" => ["a", "b", "c"], "inner" => [1, 2, 3]})
+    end
+
+    test "break does not trigger the else branch" do
+      template = "{% for i in items %}{% break %}{% else %}else{% endfor %}"
+      assert {:ok, ""} = render(template, %{"items" => ["a", "b"]})
+    end
+
+    test "continue does not trigger the else branch" do
+      template = "{% for i in items %}{% continue %}{% else %}else{% endfor %}"
+      assert {:ok, ""} = render(template, %{"items" => ["a", "b"]})
+    end
+
+    test "forloop metadata reflects the iteration at break time" do
+      template =
+        "{% for i in items %}{% if i == \"b\" %}{% break %}{% endif %}{{ forloop.index }}{% endfor %}"
+
+      assert {:ok, "1"} = render(template, %{"items" => ["a", "b", "c"]})
+    end
+
+    test "forloop metadata reflects the iteration at continue time" do
+      template =
+        "{% for i in items %}{% if i == \"b\" %}{% continue %}{% endif %}{{ forloop.index }}{% endfor %}"
+
+      assert {:ok, "13"} = render(template, %{"items" => ["a", "b", "c"]})
+    end
+
+    test "break inside an if inside a for propagates correctly" do
+      assert {:ok, "a"} =
+               render(
+                 "{% for i in items %}{% if i == \"b\" %}{% break %}{% endif %}{{ i }}{% endfor %}",
+                 %{"items" => ["a", "b", "c"]}
+               )
+    end
+  end
+
+  describe "cycle" do
+    test "advances through values on consecutive calls" do
+      assert {:ok, "abab"} =
+               render(
+                 ~s({% cycle "a", "b" %}{% cycle "a", "b" %}{% cycle "a", "b" %}{% cycle "a", "b" %})
+               )
+    end
+
+    test "wraps after exhausting values" do
+      assert {:ok, "abcab"} =
+               render(
+                 ~s({% cycle "a", "b", "c" %}{% cycle "a", "b", "c" %}{% cycle "a", "b", "c" %}{% cycle "a", "b", "c" %}{% cycle "a", "b", "c" %})
+               )
+    end
+
+    test "named groups share state across calls" do
+      template = ~s({% cycle "g": "x", "y" %}{% cycle "g": "x", "y" %})
+      assert {:ok, "xy"} = render(template)
+    end
+
+    test "distinct named groups are independent" do
+      template = ~s({% cycle "g1": "a", "b" %}{% cycle "g2": "c", "d" %}{% cycle "g1": "a", "b" %})
+      assert {:ok, "acb"} = render(template)
+    end
+
+    test "unnamed cycles with same args share state" do
+      template = ~s({% cycle "a", "b" %}{% cycle "a", "b" %})
+      assert {:ok, "ab"} = render(template)
+    end
+
+    test "unnamed cycles with different args are independent" do
+      template = ~s({% cycle "a", "b" %}{% cycle "c", "d" %}{% cycle "a", "b" %})
+      assert {:ok, "acb"} = render(template)
+    end
+
+    test "cycle inside a for loop advances across iterations" do
+      template = "{% for i in items %}{% cycle \"odd\", \"even\" %}{% endfor %}"
+
+      assert {:ok, "oddevenoddevenodd"} =
+               render(template, %{"items" => [1, 2, 3, 4, 5]})
+    end
+
+    test "named cycle inside a for loop shares state across iterations" do
+      template = "{% for i in items %}{% cycle \"row\": \"a\", \"b\" %}{% endfor %}"
+
+      assert {:ok, "ababa"} =
+               render(template, %{"items" => [1, 2, 3, 4, 5]})
+    end
+
+    test "cycle with variable values" do
+      assert {:ok, "12"} =
+               render("{% cycle x, y %}{% cycle x, y %}", %{"x" => 1, "y" => 2})
+    end
+
+    test "separate render calls do not share cycle state" do
+      {:ok, result1} = render(~s({% cycle "a", "b" %}))
+      {:ok, result2} = render(~s({% cycle "a", "b" %}))
+      assert result1 == "a" and result2 == "a"
+    end
+  end
+
   describe "iolist accumulation" do
     test "large templates render without exceeding reasonable time (no O(n^2) string concat)" do
       items = Enum.map(1..2000, &Integer.to_string/1)
@@ -245,118 +373,6 @@ defmodule Alembic.EvaluatorTest do
     test "contains operator" do
       assert {:ok, "yes"} =
                render(~s({% if s contains "ell" %}yes{% else %}no{% endif %}), %{"s" => "hello"})
-    end
-  end
-
-  describe "loop control: break and continue" do
-    test "break stops iteration mid-loop and emits nothing further" do
-      assert {:ok, "12"} =
-               render(
-                 "{% for i in items %}{% if i == 3 %}{% break %}{% endif %}{{ i }}{% endfor %}",
-                 %{"items" => [1, 2, 3, 4, 5]}
-               )
-    end
-
-    test "continue skips only the rest of the current iteration" do
-      assert {:ok, "1245"} =
-               render(
-                 "{% for i in items %}{% if i == 3 %}{% continue %}{% endif %}{{ i }}{% endfor %}",
-                 %{"items" => [1, 2, 3, 4, 5]}
-               )
-    end
-
-    test "break in a nested loop exits only the innermost loop" do
-      template =
-        "{% for a in outer %}{% for b in inner %}{% if b == 2 %}{% break %}{% endif %}{{ a }}{{ b }}{% endfor %}{% endfor %}"
-
-      assert {:ok, "x1y1"} = render(template, %{"outer" => ["x", "y"], "inner" => [1, 2, 3]})
-    end
-
-    test "continue preserves forloop metadata for the next iteration" do
-      template =
-        "{% for i in items %}{% if i == \"b\" %}{% continue %}{% endif %}{{ forloop.index }}{% endfor %}"
-
-      assert {:ok, "13"} = render(template, %{"items" => ["a", "b", "c"]})
-    end
-
-    test "break never triggers the for-else branch" do
-      assert {:ok, ""} =
-               render(
-                 "{% for i in items %}{% break %}{% else %}empty{% endfor %}",
-                 %{"items" => [1, 2]}
-               )
-    end
-
-    test "break is an error when the AST is evaluated outside a loop" do
-      assert {:error, {:loop_control_outside_loop, :break}} =
-               Evaluator.eval([:break], Context.new(%{}))
-    end
-  end
-
-  describe "cycle node" do
-    test "cycles through values round-robin, wrapping past the end" do
-      assert {:ok, "oddevenoddeven"} =
-               render(~s({% for i in items %}{% cycle "odd", "even" %}{% endfor %}), %{
-                 "items" => [1, 2, 3, 4]
-               })
-    end
-
-    test "named groups share state across two separate loops" do
-      template =
-        "{% for i in xs %}{% cycle \"rows\": \"a\", \"b\" %}{% endfor %}{% for i in ys %}{% cycle \"rows\": \"a\", \"b\" %}{% endfor %}"
-
-      assert {:ok, "abab"} = render(template, %{"xs" => [1, 2], "ys" => [3, 4]})
-    end
-
-    test "distinct named groups are independent" do
-      template =
-        "{% cycle \"a\": \"1\", \"2\" %}{% cycle \"b\": \"x\", \"y\" %}{% cycle \"a\": \"1\", \"2\" %}"
-
-      assert {:ok, "1x2"} = render(template, %{})
-    end
-
-    test "unnamed cycles with the same args share state" do
-      template = "{% cycle \"a\", \"b\" %}{% cycle \"a\", \"b\" %}{% cycle \"a\", \"b\" %}"
-      assert {:ok, "aba"} = render(template, %{})
-    end
-
-    test "cycle values may be variables" do
-      assert {:ok, "xy"} =
-               render("{% cycle a, b %}{% cycle a, b %}", %{"a" => "x", "b" => "y"})
-    end
-
-    test "cycle state does not leak between separate renders" do
-      assert {:ok, "a"} = render(~s({% cycle "a", "b" %}), %{})
-      assert {:ok, "a"} = render(~s({% cycle "a", "b" %}), %{})
-    end
-  end
-
-  describe "range iterables" do
-    test "literal inclusive range" do
-      assert {:ok, "12345"} = render("{% for i in (1..5) %}{{ i }}{% endfor %}", %{})
-    end
-
-    test "variable endpoints" do
-      assert {:ok, "234"} =
-               render("{% for i in (a..b) %}{{ i }}{% endfor %}", %{"a" => 2, "b" => 4})
-    end
-
-    test "descending range iterates zero times and triggers else" do
-      assert {:ok, "empty"} =
-               render("{% for i in (5..1) %}{{ i }}{% else %}empty{% endfor %}", %{})
-    end
-
-    test "non-integer endpoint is an error" do
-      assert {:error, {:invalid_range_endpoints, {1, "x"}}} =
-               render("{% for i in (1..b) %}{{ i }}{% endfor %}", %{"b" => "x"})
-    end
-
-    test "forloop metadata works over a range" do
-      assert {:ok, "1,2,3"} =
-               render(
-                 "{% for i in (1..3) %}{{ forloop.index }}{% if forloop.last == false %},{% endif %}{% endfor %}",
-                 %{}
-               )
     end
   end
 end

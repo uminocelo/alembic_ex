@@ -79,7 +79,8 @@ defmodule Alembic.Integration.LiquidCompatTest do
     end
 
     test "break outside a loop is rejected at parse time" do
-      assert {:error, {:parser, {:loop_control_outside_loop, "break"}}} = render("{% break %}")
+      assert {:error, {:parser, {:break_outside_loop, %{line: 1, col: 1}}}} =
+               render("{% break %}")
     end
 
     test "range iterable" do

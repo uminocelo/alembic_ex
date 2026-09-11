@@ -51,16 +51,11 @@ if_block     = TAG_OPEN , "if" , expr , TAG_CLOSE
                ;
 
 (* For loop: for var in iterable *)
-for_block    = TAG_OPEN , "for" , IDENT , "in" , iterable , TAG_CLOSE
+for_block    = TAG_OPEN , "for" , IDENT , "in" , expr , TAG_CLOSE
                , template
                , [ TAG_OPEN , "else" , TAG_CLOSE , template ]
                , TAG_OPEN , "endfor" , TAG_CLOSE
                ;
-
-(* A for-iterable is any expression, or an inline inclusive integer range.
-   Ranges are only legal here, never in a general expression position. *)
-iterable     = range | expr ;
-range        = "(" , expr , ".." , expr , ")" ;
 
 (* Variable assignment *)
 assign       = TAG_OPEN , "assign" , IDENT , "=" , expr , TAG_CLOSE ;
@@ -78,15 +73,21 @@ include      = TAG_OPEN , "include" , STRING
                , TAG_CLOSE
                ;
 
-variable_list = assignment_pair , { "," , assignment_pair } ;
-assignment_pair = IDENT , ":" , expr ;
-
-(* Loop control: only valid inside a for_block body. *)
+(* Loop control: valid only inside a for_block body — enforced
+   context-sensitively by the parser, like the "extends must be first"
+   constraint in section 5.5. *)
 break        = TAG_OPEN , "break" , TAG_CLOSE ;
 continue     = TAG_OPEN , "continue" , TAG_CLOSE ;
 
-(* Cycle: one or more values, with an optional named group prefix. *)
-cycle        = TAG_OPEN , "cycle" , [ STRING , ":" ] , expr , { "," , expr } , TAG_CLOSE ;
+(* Cycle: round-robin value output. Optional named group shares state
+   across all same-named cycles in one render; unnamed cycles are keyed
+   by their argument list. *)
+cycle        = TAG_OPEN , "cycle" , [ group , ":" ] , expr_list , TAG_CLOSE ;
+group        = STRING | IDENT ;
+expr_list    = expr , { "," , expr } ;
+
+variable_list = assignment_pair , { "," , assignment_pair } ;
+assignment_pair = IDENT , ":" , expr ;
 
 (* Terminals produced by the Lexer (Alembic.Token) *)
 TEXT_TOKEN   = (* any run of characters not starting a Liquid delimiter *) ;
@@ -117,7 +118,8 @@ and_expr         = not_expr , { "and" , not_expr } ;
 not_expr         = [ "not" ] , comparison ;
 comparison       = filtered_primary , [ compare_op , filtered_primary ] ;
 filtered_primary = primary , { filter } ;
-primary          = variable | literal ;
+primary          = variable | literal | range ;
+range            = "(" , expr , ".." , expr , ")" ;
 
 variable     = IDENT , { "." , ( IDENT | INTEGER ) | "[" , ( STRING | INTEGER ) , "]" } ;
 literal      = STRING | INTEGER | FLOAT | "true" | "false" | "nil" | "null" ;
@@ -144,7 +146,7 @@ Each production maps onto exactly one `Alembic.AST.expr()` shape:
 | `comparison` (with `compare_op`) | `{:compare, op, left, right}` |
 | `and_expr` / `or_expr` | `{:logical, :and \| :or, left, right}` |
 | `not_expr` (with `not`) | `{:not, expr}` |
-| `range` (iterable position only) | `{:range, from_expr, to_expr}` |
+| `range` | `{:range, from_expr, to_expr}` |
 | `filter` | `{:filter, name, args}` — `args :: [expr()]` |
 
 Top-level node productions map onto `Alembic.AST.ast_node()` shapes:
@@ -159,9 +161,9 @@ Top-level node productions map onto `Alembic.AST.ast_node()` shapes:
 | `extends` | `{:extends, template_name}` |
 | `block` | `{:block, name, body}` |
 | `include` | `{:include, template_name, variables}` |
-| `break` | `:break` |
-| `continue` | `:continue` |
-| `cycle` | `{:cycle, group, values}` — `group :: expr() \| nil`, `values :: [expr()]` |
+| `break` | `{:break}` |
+| `continue` | `{:continue}` |
+| `cycle` | `{:cycle, group, values}` — `group :: String.t() \| nil`, `values :: [expr()]` |
 
 ---
 

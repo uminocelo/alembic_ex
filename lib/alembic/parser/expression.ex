@@ -28,6 +28,7 @@ defmodule Alembic.Parser.Expression do
           | :missing_filter_name
           | {:unknown_operator, String.t()}
           | {:unexpected_token, term()}
+          | :range_not_allowed
 
   @doc """
   Parses the raw string content of an output tag or a tag condition into an
@@ -47,75 +48,30 @@ defmodule Alembic.Parser.Expression do
         {:not, {:variable, ["skip"]}}}}
   """
   @spec parse(String.t()) :: {:ok, AST.expr()} | {:error, reason()}
-  def parse(source) when is_binary(source) do
-    case String.trim(source) do
-      "" ->
-        {:error, :empty_expression}
-
-      trimmed ->
-        with {:ok, tokens} <- tokenize(trimmed) do
-          parse_tokens(tokens)
-        end
-    end
-  end
+  def parse(source) when is_binary(source), do: parse(source, false)
 
   @doc """
-  Like `parse/1`, but additionally accepts an inline inclusive integer range
-  (e.g. `(1..5)`) as a whole expression. Ranges are only valid in a
-  `{% for %}` iterable position, so this entry point is used by the parser's
-  `parse_for/3` and nowhere else.
-
-  ## Examples
-
-      iex> Alembic.Parser.Expression.parse_iterable("(1..3)")
-      {:ok, {:range, {:literal, 1}, {:literal, 3}}}
-
-      iex> Alembic.Parser.Expression.parse_iterable("items")
-      {:ok, {:variable, ["items"]}}
+  Like `parse/1`, but `allow_ranges: true` permits `(from..to)` range
+  literals. Ranges are restricted to the `{% for %}` iterable position;
+  calling `parse/1` (or `parse/2` without the flag) on a range returns
+  `{:error, :range_not_allowed}`.
   """
-  @spec parse_iterable(String.t()) :: {:ok, AST.expr()} | {:error, reason()}
-  def parse_iterable(source) when is_binary(source) do
+  @spec parse(String.t(), boolean()) :: {:ok, AST.expr()} | {:error, reason()}
+  def parse(source, allow_ranges) when is_binary(source) and is_boolean(allow_ranges) do
     case String.trim(source) do
       "" ->
         {:error, :empty_expression}
 
       trimmed ->
-        with {:ok, tokens} <- tokenize(trimmed) do
-          parse_iterable_tokens(tokens)
+        with {:ok, tokens} <- tokenize(trimmed),
+             {:ok, expr, []} <- parse_or(tokens, true, allow_ranges) do
+          {:ok, expr}
+        else
+          {:ok, _expr, [token | _rest]} -> {:error, {:unexpected_token, token}}
+          {:error, reason} -> {:error, reason}
         end
     end
   end
-
-  defp parse_iterable_tokens(tokens) do
-    case parse_range(tokens) do
-      {:ok, range, []} -> {:ok, range}
-      _other -> parse_tokens(tokens)
-    end
-  end
-
-  defp parse_tokens(tokens) do
-    case parse_or(tokens, true) do
-      {:ok, expr, []} -> {:ok, expr}
-      {:ok, _expr, [token | _rest]} -> {:error, {:unexpected_token, token}}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  # A range is only recognized as the entire iterable expression — it never
-  # nests inside a larger expression. The endpoints are parsed as primaries
-  # (integer literals or variables).
-  defp parse_range([:lparen | rest]) do
-    with {:ok, from, rest2} <- parse_primary(rest),
-         [:dotdot | rest3] <- rest2,
-         {:ok, to, rest4} <- parse_primary(rest3),
-         [:rparen | rest5] <- rest4 do
-      {:ok, {:range, from, to}, rest5}
-    else
-      _other -> :no_range
-    end
-  end
-
-  defp parse_range(_tokens), do: :no_range
 
   # ---- Recursive descent (precedence, low to high): or, and, not, comparison ----
   #
@@ -124,63 +80,65 @@ defmodule Alembic.Parser.Expression do
   # ambiguous, and this precedence chain would silently parse it as
   # `x | f: (arg | g)` instead of the intended `(x | f: arg) | g`.
 
-  defp parse_or(tokens, allow_filters) do
-    with {:ok, left, rest} <- parse_and(tokens, allow_filters) do
-      parse_or_rest(left, rest, allow_filters)
+  defp parse_or(tokens, allow_filters, allow_ranges) do
+    with {:ok, left, rest} <- parse_and(tokens, allow_filters, allow_ranges) do
+      parse_or_rest(left, rest, allow_filters, allow_ranges)
     end
   end
 
-  defp parse_or_rest(left, [:or | rest], allow_filters) do
-    with {:ok, right, rest2} <- parse_and(rest, allow_filters) do
-      parse_or_rest({:logical, :or, left, right}, rest2, allow_filters)
+  defp parse_or_rest(left, [:or | rest], allow_filters, allow_ranges) do
+    with {:ok, right, rest2} <- parse_and(rest, allow_filters, allow_ranges) do
+      parse_or_rest({:logical, :or, left, right}, rest2, allow_filters, allow_ranges)
     end
   end
 
-  defp parse_or_rest(left, rest, _allow_filters), do: {:ok, left, rest}
+  defp parse_or_rest(left, rest, _allow_filters, _allow_ranges), do: {:ok, left, rest}
 
-  defp parse_and(tokens, allow_filters) do
-    with {:ok, left, rest} <- parse_not(tokens, allow_filters) do
-      parse_and_rest(left, rest, allow_filters)
+  defp parse_and(tokens, allow_filters, allow_ranges) do
+    with {:ok, left, rest} <- parse_not(tokens, allow_filters, allow_ranges) do
+      parse_and_rest(left, rest, allow_filters, allow_ranges)
     end
   end
 
-  defp parse_and_rest(left, [:and | rest], allow_filters) do
-    with {:ok, right, rest2} <- parse_not(rest, allow_filters) do
-      parse_and_rest({:logical, :and, left, right}, rest2, allow_filters)
+  defp parse_and_rest(left, [:and | rest], allow_filters, allow_ranges) do
+    with {:ok, right, rest2} <- parse_not(rest, allow_filters, allow_ranges) do
+      parse_and_rest({:logical, :and, left, right}, rest2, allow_filters, allow_ranges)
     end
   end
 
-  defp parse_and_rest(left, rest, _allow_filters), do: {:ok, left, rest}
+  defp parse_and_rest(left, rest, _allow_filters, _allow_ranges), do: {:ok, left, rest}
 
-  defp parse_not([:not | rest], allow_filters) do
-    with {:ok, expr, rest2} <- parse_comparison(rest, allow_filters) do
+  defp parse_not([:not | rest], allow_filters, allow_ranges) do
+    with {:ok, expr, rest2} <- parse_comparison(rest, allow_filters, allow_ranges) do
       {:ok, {:not, expr}, rest2}
     end
   end
 
-  defp parse_not(tokens, allow_filters), do: parse_comparison(tokens, allow_filters)
+  defp parse_not(tokens, allow_filters, allow_ranges),
+    do: parse_comparison(tokens, allow_filters, allow_ranges)
 
   @compare_ops [:eq, :neq, :gt, :lt, :gte, :lte, :contains]
 
-  defp parse_comparison(tokens, allow_filters) do
-    with {:ok, left, rest} <- parse_operand(tokens, allow_filters) do
-      parse_comparison_rhs(left, rest, allow_filters)
+  defp parse_comparison(tokens, allow_filters, allow_ranges) do
+    with {:ok, left, rest} <- parse_operand(tokens, allow_filters, allow_ranges) do
+      parse_comparison_rhs(left, rest, allow_filters, allow_ranges)
     end
   end
 
-  defp parse_comparison_rhs(left, [{:op, op} | rest], allow_filters) when op in @compare_ops do
-    with {:ok, right, rest2} <- parse_operand(rest, allow_filters) do
+  defp parse_comparison_rhs(left, [{:op, op} | rest], allow_filters, allow_ranges)
+       when op in @compare_ops do
+    with {:ok, right, rest2} <- parse_operand(rest, allow_filters, allow_ranges) do
       {:ok, {:compare, op, left, right}, rest2}
     end
   end
 
-  defp parse_comparison_rhs(left, rest, _allow_filters), do: {:ok, left, rest}
+  defp parse_comparison_rhs(left, rest, _allow_filters, _allow_ranges), do: {:ok, left, rest}
 
-  defp parse_operand(tokens, true), do: parse_filtered_primary(tokens)
-  defp parse_operand(tokens, false), do: parse_primary(tokens)
+  defp parse_operand(tokens, true, allow_ranges), do: parse_filtered_primary(tokens, allow_ranges)
+  defp parse_operand(tokens, false, allow_ranges), do: parse_primary(tokens, allow_ranges)
 
-  defp parse_filtered_primary(tokens) do
-    with {:ok, primary, rest} <- parse_primary(tokens) do
+  defp parse_filtered_primary(tokens, allow_ranges) do
+    with {:ok, primary, rest} <- parse_primary(tokens, allow_ranges) do
       collect_filters(rest, [], primary)
     end
   end
@@ -203,7 +161,7 @@ defmodule Alembic.Parser.Expression do
     do: {:ok, {:filter_chain, base, Enum.reverse(acc)}, tokens}
 
   defp parse_filter_args([:colon | rest]) do
-    with {:ok, first_arg, rest2} <- parse_or(rest, false) do
+    with {:ok, first_arg, rest2} <- parse_or(rest, false, false) do
       collect_more_filter_args(rest2, [first_arg])
     end
   end
@@ -211,43 +169,64 @@ defmodule Alembic.Parser.Expression do
   defp parse_filter_args(tokens), do: {:ok, [], tokens}
 
   defp collect_more_filter_args([:comma | rest], acc) do
-    with {:ok, arg, rest2} <- parse_or(rest, false) do
+    with {:ok, arg, rest2} <- parse_or(rest, false, false) do
       collect_more_filter_args(rest2, [arg | acc])
     end
   end
 
   defp collect_more_filter_args(tokens, acc), do: {:ok, Enum.reverse(acc), tokens}
 
-  defp parse_primary([{:string, s} | rest]), do: {:ok, {:literal, s}, rest}
-  defp parse_primary([{:int, n} | rest]), do: {:ok, {:literal, n}, rest}
-  defp parse_primary([{:float, f} | rest]), do: {:ok, {:literal, f}, rest}
-  defp parse_primary([{:bool, b} | rest]), do: {:ok, {:literal, b}, rest}
-  defp parse_primary([:nil_lit | rest]), do: {:ok, {:literal, nil}, rest}
-  defp parse_primary([{:ident, name} | rest]), do: parse_variable_path([name], rest)
-  defp parse_primary([]), do: {:error, {:unexpected_token, :eof}}
-  defp parse_primary([token | _rest]), do: {:error, {:unexpected_token, token}}
+  defp parse_primary([{:string, s} | rest], _allow_ranges), do: {:ok, {:literal, s}, rest}
+  defp parse_primary([{:int, n} | rest], _allow_ranges), do: {:ok, {:literal, n}, rest}
+  defp parse_primary([{:float, f} | rest], _allow_ranges), do: {:ok, {:literal, f}, rest}
+  defp parse_primary([{:bool, b} | rest], _allow_ranges), do: {:ok, {:literal, b}, rest}
+  defp parse_primary([:nil_lit | rest], _allow_ranges), do: {:ok, {:literal, nil}, rest}
 
-  defp parse_variable_path(segments, [:dot | rest]) do
-    case rest do
-      [{:ident, name} | rest2] -> parse_variable_path([name | segments], rest2)
-      [{:int, n} | rest2] -> parse_variable_path([Integer.to_string(n) | segments], rest2)
-      _ -> {:error, {:unexpected_token, :expected_identifier_after_dot}}
+  defp parse_primary([{:ident, name} | rest], allow_ranges),
+    do: parse_variable_path([name], rest, allow_ranges)
+
+  defp parse_primary([:lparen | rest], true), do: parse_range(rest)
+  defp parse_primary([:lparen | _rest], false), do: {:error, :range_not_allowed}
+
+  defp parse_primary([], _allow_ranges), do: {:error, {:unexpected_token, :eof}}
+  defp parse_primary([token | _rest], _allow_ranges), do: {:error, {:unexpected_token, token}}
+
+  defp parse_range(tokens) do
+    with {:ok, from, [:dotdot | rest2]} <- parse_or(tokens, true, false),
+         {:ok, to, [:rparen | rest3]} <- parse_or(rest2, true, false) do
+      {:ok, {:range, from, to}, rest3}
+    else
+      {:error, reason} -> {:error, reason}
+      _ -> {:error, {:unexpected_token, :expected_rparen}}
     end
   end
 
-  defp parse_variable_path(segments, [:lbracket, {:string, key}, :rbracket | rest]) do
-    parse_variable_path([key | segments], rest)
+  defp parse_variable_path(segments, [:dot | rest], allow_ranges) do
+    case rest do
+      [{:ident, name} | rest2] ->
+        parse_variable_path([name | segments], rest2, allow_ranges)
+
+      [{:int, n} | rest2] ->
+        parse_variable_path([Integer.to_string(n) | segments], rest2, allow_ranges)
+
+      _ ->
+        {:error, {:unexpected_token, :expected_identifier_after_dot}}
+    end
   end
 
-  defp parse_variable_path(segments, [:lbracket, {:int, index}, :rbracket | rest]) do
-    parse_variable_path([Integer.to_string(index) | segments], rest)
+  defp parse_variable_path(segments, [:lbracket, {:string, key}, :rbracket | rest], allow_ranges) do
+    parse_variable_path([key | segments], rest, allow_ranges)
   end
 
-  defp parse_variable_path(_segments, [:lbracket | _rest]) do
+  defp parse_variable_path(segments, [:lbracket, {:int, index}, :rbracket | rest], allow_ranges) do
+    parse_variable_path([Integer.to_string(index) | segments], rest, allow_ranges)
+  end
+
+  defp parse_variable_path(_segments, [:lbracket | _rest], _allow_ranges) do
     {:error, {:unexpected_token, :expected_bracket_key}}
   end
 
-  defp parse_variable_path(segments, rest) do
+  defp parse_variable_path(segments, rest, _allow_ranges) do
     {:ok, {:variable, Enum.reverse(segments)}, rest}
   end
 
@@ -273,11 +252,11 @@ defmodule Alembic.Parser.Expression do
   defp tokenize("." <> rest, acc), do: tokenize(rest, [:dot | acc])
   defp tokenize("[" <> rest, acc), do: tokenize(rest, [:lbracket | acc])
   defp tokenize("]" <> rest, acc), do: tokenize(rest, [:rbracket | acc])
-  defp tokenize("(" <> rest, acc), do: tokenize(rest, [:lparen | acc])
-  defp tokenize(")" <> rest, acc), do: tokenize(rest, [:rparen | acc])
   defp tokenize("|" <> rest, acc), do: tokenize(rest, [:pipe | acc])
   defp tokenize(":" <> rest, acc), do: tokenize(rest, [:colon | acc])
   defp tokenize("," <> rest, acc), do: tokenize(rest, [:comma | acc])
+  defp tokenize("(" <> rest, acc), do: tokenize(rest, [:lparen | acc])
+  defp tokenize(")" <> rest, acc), do: tokenize(rest, [:rparen | acc])
 
   defp tokenize("\"" <> rest, acc) do
     case scan_string(rest, ?", []) do
