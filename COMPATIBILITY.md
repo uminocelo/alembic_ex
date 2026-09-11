@@ -23,6 +23,14 @@ hand-written in `test/integration/liquid_compat_test.exs`.
   `{% endif %}`, `{% for %}` / `{% else %}` / `{% endfor %}` with full
   `forloop` metadata (`index`, `index0`, `rindex`, `rindex0`, `first`,
   `last`, `length`).
+- **Loop control** — `{% break %}` and `{% continue %}` inside a `{% for %}`
+  body; both are parse errors anywhere else. `break` in a nested loop exits
+  only the innermost loop.
+- **Cycle** — `{% cycle "a", "b" %}` round-robins its values on each render;
+  `{% cycle "rows": "a", "b" %}` shares state across same-named groups.
+- **Range iterables** — `{% for i in (1..5) %}` with integer literal or
+  variable endpoints. Descending ranges iterate zero times and trigger
+  `{% else %}`, matching Liquid rather than Elixir's descending ranges.
 - **Operators** — `==`, `!=`, `>`, `<`, `>=`, `<=`, `contains`, `and`, `or`,
   `not`, with `not > and > or` precedence (see `docs/grammar.md` §5.4).
 - **Assignment** — `{% assign var = expr %}`, visible to every node

@@ -63,6 +63,36 @@ defmodule Alembic.Integration.LiquidCompatTest do
       template = "{% for x in xs %}{{ forloop.index }}/{{ forloop.length }} {% endfor %}"
       assert {:ok, "1/2 2/2 "} = render(template, %{"xs" => ["a", "b"]})
     end
+
+    test "break and continue" do
+      assert {:ok, "1"} =
+               render(
+                 "{% for x in xs %}{% if x == 2 %}{% break %}{% endif %}{{ x }}{% endfor %}",
+                 %{"xs" => [1, 2, 3]}
+               )
+
+      assert {:ok, "13"} =
+               render(
+                 "{% for x in xs %}{% if x == 2 %}{% continue %}{% endif %}{{ x }}{% endfor %}",
+                 %{"xs" => [1, 2, 3]}
+               )
+    end
+
+    test "break outside a loop is rejected at parse time" do
+      assert {:error, {:parser, {:break_outside_loop, %{line: 1, col: 1}}}} =
+               render("{% break %}")
+    end
+
+    test "range iterable" do
+      assert {:ok, "123"} = render("{% for i in (1..3) %}{{ i }}{% endfor %}")
+    end
+
+    test "cycle round-robins values" do
+      assert {:ok, "abab"} =
+               render(~s({% for x in xs %}{% cycle "a", "b" %}{% endfor %}), %{
+                 "xs" => [1, 2, 3, 4]
+               })
+    end
   end
 
   describe "assign tag" do
