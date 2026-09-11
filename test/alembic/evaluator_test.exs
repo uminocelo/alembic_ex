@@ -480,5 +480,10 @@ defmodule Alembic.EvaluatorTest do
 
       assert {:ok, "abb"} = render(template, %{"items" => [1, 2, 3]})
     end
+
+    test "a when value may carry a filtered expression with comma-separated args" do
+      template = ~s({% case s %}{% when t | replace: "a", "b" %}hit{% else %}miss{% endcase %})
+      assert {:ok, "hit"} = render(template, %{"s" => "b", "t" => "a"})
+    end
   end
 end

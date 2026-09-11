@@ -348,10 +348,20 @@ defmodule Alembic.Parser do
 
   # ---- Capture - name / body / endcapture ----
 
+  # The grammar declares the capture name as a single IDENT, so validate it
+  # with the expression parser rather than accepting any trimmed string —
+  # otherwise `{% capture foo.bar %}` would store a value under a key no
+  # output path can resolve.
   defp parse_capture(name, tokens, pos, in_loop?) do
-    with {:ok, body, rest} <- parse_template(tokens, [], in_loop?),
-         {:ok, rest2} <- expect_tag(rest, "endcapture", pos) do
-      {:ok, {:capture, name, body}, rest2}
+    case Expression.parse(name) do
+      {:ok, {:variable, [name]}} ->
+        with {:ok, body, rest} <- parse_template(tokens, [], in_loop?),
+             {:ok, rest2} <- expect_tag(rest, "endcapture", pos) do
+          {:ok, {:capture, name, body}, rest2}
+        end
+
+      _other ->
+        {:error, {:malformed_capture, name}}
     end
   end
 
@@ -410,19 +420,9 @@ defmodule Alembic.Parser do
   defp parse_case_else(_whens, tokens, in_loop?), do: parse_optional_else(tokens, in_loop?)
 
   defp parse_when_values(raw) do
-    raw
-    |> split_top_level_commas()
-    |> Enum.reduce_while({:ok, []}, fn part, {:ok, acc} ->
-      trimmed = String.trim(part)
-
-      case Expression.parse(trimmed) do
-        {:ok, expr} -> {:cont, {:ok, [expr | acc]}}
-        {:error, reason} -> {:halt, {:error, {:malformed_when, {trimmed, reason}}}}
-      end
-    end)
-    |> case do
-      {:ok, values} -> {:ok, Enum.reverse(values)}
-      {:error, reason} -> {:error, reason}
+    case Expression.parse_list(raw) do
+      {:ok, values} -> {:ok, values}
+      {:error, reason} -> {:error, {:malformed_when, {String.trim(raw), reason}}}
     end
   end
 
@@ -575,19 +575,9 @@ defmodule Alembic.Parser do
   end
 
   defp parse_cycle_values(raw) do
-    raw
-    |> split_top_level_commas()
-    |> Enum.reduce_while({:ok, []}, fn part, {:ok, acc} ->
-      trimmed = String.trim(part)
-
-      case Expression.parse(trimmed) do
-        {:ok, expr} -> {:cont, {:ok, [expr | acc]}}
-        {:error, reason} -> {:halt, {:error, {:invalid_expression, trimmed, reason}}}
-      end
-    end)
-    |> case do
-      {:ok, values} -> {:ok, Enum.reverse(values)}
-      {:error, reason} -> {:error, reason}
+    case Expression.parse_list(raw) do
+      {:ok, values} -> {:ok, values}
+      {:error, reason} -> {:error, {:invalid_expression, String.trim(raw), reason}}
     end
   end
 

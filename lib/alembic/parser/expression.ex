@@ -73,6 +73,52 @@ defmodule Alembic.Parser.Expression do
     end
   end
 
+  @doc """
+  Parses a comma-separated list of expressions (the `expr_list` production) —
+  the values of `{% when a, b, c %}` and `{% cycle a, b %}`.
+
+  Commas that belong to a filter's own argument list are consumed by the
+  filter parser, so splitting happens only at expression-list boundaries:
+  `x | append: "a", "b"` is one filtered expression (two filter arguments),
+  while `1, 2, 3` is three values.
+
+  ## Examples
+
+      iex> Alembic.Parser.Expression.parse_list("1, 2, 3")
+      {:ok, [{:literal, 1}, {:literal, 2}, {:literal, 3}]}
+
+      iex> Alembic.Parser.Expression.parse_list(~s(x | append: "a", "b"))
+      {:ok,
+       [{:filter_chain, {:variable, ["x"]},
+         [{:filter, "append", [{:literal, "a"}, {:literal, "b"}]}]}]}
+  """
+  @spec parse_list(String.t()) :: {:ok, [AST.expr()]} | {:error, reason()}
+  def parse_list(source) when is_binary(source) do
+    case String.trim(source) do
+      "" ->
+        {:error, :empty_expression}
+
+      trimmed ->
+        with {:ok, tokens} <- tokenize(trimmed) do
+          parse_list_tokens(tokens, [])
+        end
+    end
+  end
+
+  defp parse_list_tokens([], acc), do: {:ok, Enum.reverse(acc)}
+  defp parse_list_tokens([:comma | _rest], _acc), do: {:error, {:unexpected_token, :comma}}
+
+  defp parse_list_tokens(tokens, acc) do
+    with {:ok, expr, rest} <- parse_or(tokens, true, false) do
+      case rest do
+        [] -> {:ok, Enum.reverse([expr | acc])}
+        [:comma] -> {:error, {:unexpected_token, :comma}}
+        [:comma | rest2] -> parse_list_tokens(rest2, [expr | acc])
+        [token | _rest] -> {:error, {:unexpected_token, token}}
+      end
+    end
+  end
+
   # ---- Recursive descent (precedence, low to high): or, and, not, comparison ----
   #
   # `allow_filters` is `false` while parsing a filter's own arguments — see
