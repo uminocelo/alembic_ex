@@ -26,6 +26,9 @@ node         = text
              | break
              | continue
              | cycle
+             | capture
+             | unless
+             | case
              ;
 
 (* Literal text passthrough. Never contains a raw "{{" or "{%" — those always
@@ -85,6 +88,31 @@ continue     = TAG_OPEN , "continue" , TAG_CLOSE ;
 cycle        = TAG_OPEN , "cycle" , [ group , ":" ] , expr_list , TAG_CLOSE ;
 group        = STRING | IDENT ;
 expr_list    = expr , { "," , expr } ;
+
+(* Capture: render the body and store the flattened result in a variable,
+   with the same visibility as {% assign %}. *)
+capture      = TAG_OPEN , "capture" , IDENT , TAG_CLOSE
+               , template
+               , TAG_OPEN , "endcapture" , TAG_CLOSE
+               ;
+
+(* Unless: negated if, desugared by the parser to
+   {:if, {:not, expr}, body, [], else} — no dedicated AST node. Unlike if,
+   {% elsif %} is invalid inside it. *)
+unless       = TAG_OPEN , "unless" , expr , TAG_CLOSE
+               , template
+               , [ TAG_OPEN , "else" , TAG_CLOSE , template ]
+               , TAG_OPEN , "endunless" , TAG_CLOSE
+               ;
+
+(* Case/when multi-way branch. An {% else %} before the first {% when %} is a
+   parse error. *)
+case         = TAG_OPEN , "case" , expr , TAG_CLOSE
+               , { when_clause }
+               , [ TAG_OPEN , "else" , TAG_CLOSE , template ]
+               , TAG_OPEN , "endcase" , TAG_CLOSE
+               ;
+when_clause  = TAG_OPEN , "when" , expr_list , TAG_CLOSE , template ;
 
 variable_list = assignment_pair , { "," , assignment_pair } ;
 assignment_pair = IDENT , ":" , expr ;
@@ -164,6 +192,9 @@ Top-level node productions map onto `Alembic.AST.ast_node()` shapes:
 | `break` | `{:break}` |
 | `continue` | `{:continue}` |
 | `cycle` | `{:cycle, group, values}` — `group :: String.t() \| nil`, `values :: [expr()]` |
+| `capture` | `{:capture, var, body}` |
+| `unless` | `{:if, {:not, condition}, body, [], else_branch}` — desugared, no distinct node |
+| `case` | `{:case, subject, whens, else_branch}` — `whens :: [{[expr()], [ast_node()]}]` |
 
 ---
 
