@@ -37,8 +37,10 @@ Alembic.render_file("index.html", %{"title" => "Home"})
   separate steps, so a caller can parse a template once and reuse the AST.
   See [`Alembic`](https://hexdocs.pm/alembic_template_engine/Alembic.html).
 - **Full control flow** — `{% if %}` / `{% elsif %}` / `{% else %}`,
-  `{% for %}` with `forloop` metadata, `{% assign %}`, comparison and
-  logical operators. See
+  `{% for %}` with `forloop` metadata and `{% break %}` / `{% continue %}`,
+  `{% unless %}`, `{% case %}` / `{% when %}`, `{% capture %}`, `{% cycle %}`,
+  range iterables (`{% for i in (1..5) %}`), `{% assign %}`, comparison and
+  logical operators (including the `empty` / `blank` keywords). See
   [`Alembic.Parser`](https://hexdocs.pm/alembic_template_engine/Alembic.Parser.html)
   and [`docs/grammar.md`](docs/grammar.md).
 - **Built-in filter library** — the full Liquid string/array/number/misc
@@ -48,7 +50,12 @@ Alembic.render_file("index.html", %{"title" => "Home"})
 - **Template inheritance** — multi-level `{% extends %}` / `{% block %}`
   chains with `{{ block.super }}`. See
   [`Alembic.Inheritance`](https://hexdocs.pm/alembic_template_engine/Alembic.Inheritance.html).
-- **Partials** — `{% include %}` with optional variable passing.
+- **Output expressions** — `{{ user.name }}`, `{{ items[key] }}` dynamic
+  bracket access, and literal/filter bases such as `{{ 42 }}` or
+  `{{ "hi" | upcase }}`.
+- **Partials** — shared-scope `{% include %}` with optional variable
+  passing, and isolated-scope `{% render %}` (only explicitly passed
+  variables are visible).
 - **ETS-backed compiled-template cache** — automatic mtime-based
   invalidation, `cache: false` per-call bypass. See
   [`Alembic.Cache`](https://hexdocs.pm/alembic_template_engine/Alembic.Cache.html).

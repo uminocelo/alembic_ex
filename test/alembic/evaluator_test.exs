@@ -108,7 +108,7 @@ defmodule Alembic.EvaluatorTest do
   describe "strict mode (Context.strict/2)" do
     test "an undefined variable in an output tag errors instead of rendering empty" do
       ctx = Context.new(%{}) |> Context.strict(true)
-      ast = [{:output, ["missing"], []}]
+      ast = [{:output, {:variable, ["missing"]}}]
       assert {:error, {:undefined_variable, ["missing"]}} = Evaluator.eval(ast, ctx)
     end
 
@@ -120,13 +120,13 @@ defmodule Alembic.EvaluatorTest do
 
     test "a defined variable renders normally even in strict mode" do
       ctx = Context.new(%{"name" => "Alice"}) |> Context.strict(true)
-      ast = [{:output, ["name"], []}]
+      ast = [{:output, {:variable, ["name"]}}]
       assert {:ok, "Alice"} = Evaluator.eval(ast, ctx)
     end
 
     test "strict mode is off by default" do
       ctx = Context.new(%{})
-      ast = [{:output, ["missing"], []}]
+      ast = [{:output, {:variable, ["missing"]}}]
       assert {:ok, ""} = Evaluator.eval(ast, ctx)
     end
   end
@@ -555,11 +555,55 @@ defmodule Alembic.EvaluatorTest do
         end)
 
       ast = [
-        {:capture, "greeting", [{:text, "Hi "}, {:output, ["name"], []}]},
+        {:capture, "greeting", [{:text, "Hi "}, {:output, {:variable, ["name"]}}]},
         {:include, "partial", %{}}
       ]
 
       assert {:ok, "[Hi Al]"} = Alembic.Evaluator.eval(ast, ctx)
+    end
+  end
+
+  describe "render node" do
+    test "renders the partial in an isolated context" do
+      ctx =
+        Alembic.Context.new(%{"name" => "Parent", "secret" => "hidden"})
+        |> Alembic.Context.assign("secret", "hidden")
+        |> Alembic.Context.loader(fn
+          "partial" -> {:ok, "[{{ name }}|{{ secret }}]"}
+          _ -> {:error, :not_found}
+        end)
+
+      ast = [{:render, "partial", %{"name" => {:literal, "Bob"}}}]
+      assert {:ok, "[Bob|]"} = Alembic.Evaluator.eval(ast, ctx)
+    end
+
+    test "carries strict mode into the partial" do
+      ctx =
+        Alembic.Context.new(%{})
+        |> Alembic.Context.strict(true)
+        |> Alembic.Context.loader(fn "partial" -> {:ok, "{{ missing }}"} end)
+
+      ast = [{:render, "partial", %{}}]
+      assert {:error, {:undefined_variable, ["missing"]}} = Alembic.Evaluator.eval(ast, ctx)
+    end
+
+    test "an unconfigured loader returns the include-style loader error" do
+      ast = [{:render, "partial", %{}}]
+
+      assert {:error, :include_loader_not_configured} =
+               Alembic.Evaluator.eval(ast, Context.new(%{}))
+    end
+
+    test "assignments in the partial do not leak into the parent context" do
+      ctx =
+        Alembic.Context.new(%{})
+        |> Alembic.Context.loader(fn
+          "partial" -> {:ok, "{% assign flag = 'set' %}"}
+          _ -> {:error, :not_found}
+        end)
+
+      ast = [{:render, "partial", %{}}, {:output, {:variable, ["flag"]}}]
+      assert {:ok, ""} = Alembic.Evaluator.eval(ast, ctx)
     end
   end
 

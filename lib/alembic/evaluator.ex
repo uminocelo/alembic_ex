@@ -47,11 +47,11 @@ defmodule Alembic.Evaluator do
 
   ## Examples
 
-      iex> ast = [{:text, "Hello, "}, {:output, ["name"], []}, {:text, "!"}]
+      iex> ast = [{:text, "Hello, "}, {:output, {:variable, ["name"]}}, {:text, "!"}]
       iex> Alembic.Evaluator.eval(ast, Alembic.Context.new(%{"name" => "World"}))
       {:ok, "Hello, World!"}
 
-      iex> ast = [{:output, ["missing"], []}]
+      iex> ast = [{:output, {:variable, ["missing"]}}]
       iex> ctx = Alembic.Context.new(%{}) |> Alembic.Context.strict(true)
       iex> Alembic.Evaluator.eval(ast, ctx)
       {:error, {:undefined_variable, ["missing"]}}
@@ -85,11 +85,9 @@ defmodule Alembic.Evaluator do
 
   defp eval_node({:text, content}, ctx), do: {:ok, content, ctx}
 
-  defp eval_node({:output, path, filters}, ctx) do
-    with {:ok, value} <- resolve_or_error(ctx, path),
-         {:ok, filter_pairs} <- eval_filter_list(filters, ctx),
-         {:ok, filtered} <- Filters.apply_chain(value, filter_pairs, ctx) do
-      {:ok, to_output_string(filtered), ctx}
+  defp eval_node({:output, expr}, ctx) do
+    with {:ok, value} <- eval_expr(expr, ctx) do
+      {:ok, to_output_string(value), ctx}
     end
   end
 
@@ -184,6 +182,37 @@ defmodule Alembic.Evaluator do
       end
     end
   end
+
+  defp eval_node({:render, name, variables}, ctx) do
+    with {:ok, loader_fn} <- require_loader(ctx),
+         {:ok, source} <- call_loader(loader_fn, name),
+         {:ok, ast} <- compile_include(source),
+         {:ok, resolved_vars} <- eval_var_map(variables, ctx) do
+      render_ctx = isolated_context(resolved_vars, ctx)
+
+      case eval_nodes(ast, render_ctx) do
+        {:ok, chunk, _render_ctx} -> {:ok, chunk, ctx}
+        {:break, chunk, _render_ctx} -> {:break, chunk, ctx}
+        {:continue, chunk, _render_ctx} -> {:continue, chunk, ctx}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  # `{% render %}` is isolated: the partial starts from an empty scope seeded
+  # only with the explicitly passed vars, and any scopes/assigns it creates
+  # never leak back to the parent. Rendering options that describe the
+  # environment rather than the data — strict mode, the loader, and custom
+  # filters — do carry over.
+  defp isolated_context(vars, ctx) do
+    %Context{scopes: [vars]}
+    |> Context.strict(ctx.strict)
+    |> Context.custom_filters(ctx.custom_filters)
+    |> put_loader(ctx.loader_fn)
+  end
+
+  defp put_loader(context, nil), do: context
+  defp put_loader(context, loader_fn), do: Context.loader(context, loader_fn)
 
   defp eval_elsifs([{cond_expr, branch} | rest], else_branch, ctx) do
     with {:ok, cond_value} <- eval_expr(cond_expr, ctx) do

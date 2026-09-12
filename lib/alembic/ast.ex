@@ -15,13 +15,14 @@ defmodule Alembic.AST do
   | Node | Shape | Example source |
   |---|---|---|
   | `text_node()` | `{:text, content}` | `Hello, ` |
-  | `output_node()` | `{:output, path, filters}` | `{{ user.name \\| upcase }}` |
+  | `output_node()` | `{:output, expr}` | `{{ user.name \\| upcase }}` |
   | `if_node()` | `{:if, cond, then, elsifs, else}` | `{% if x %}...{% endif %}` |
   | `for_node()` | `{:for, var, iterable, body, else}` | `{% for i in xs %}...{% endfor %}` |
   | `assign_node()` | `{:assign, var, expr}` | `{% assign x = 1 %}` |
   | `extends_node()` | `{:extends, name}` | `{% extends "base.html" %}` |
   | `block_node()` | `{:block, name, body}` | `{% block title %}...{% endblock %}` |
   | `include_node()` | `{:include, name, vars}` | `{% include "header.html" %}` |
+  | `render_node()` | `{:render, name, vars}` | `{% render "card.html", title: post.title %}` |
   | `break_node()` | `{:break}` | `{% break %}` |
   | `continue_node()` | `{:continue}` | `{% continue %}` |
   | `cycle_node()` | `{:cycle, group, values}` | `{% cycle "a", "b" %}` |
@@ -32,7 +33,7 @@ defmodule Alembic.AST do
 
   `{{ user.name | upcase }}` maps to:
 
-      {:output, ["user", "name"], [{:filter, "upcase", []}]}
+      {:output, {:filter_chain, {:variable, ["user", "name"]}, [{:filter, "upcase", []}]}}
 
   A non-trivial template:
 
@@ -48,7 +49,7 @@ defmodule Alembic.AST do
         {:extends, "base.html"},
         {:block, "content", [
           {:text, "\\n  Hello, "},
-          {:output, ["user", "name"], [{:filter, "upcase", []}]},
+          {:output, {:filter_chain, {:variable, ["user", "name"]}, [{:filter, "upcase", []}]}},
           {:text, "!\\n  "},
           {:if, {:variable, ["user", "admin"]}, [{:text, "(admin)"}], [], nil},
           {:text, "\\n"}
@@ -69,11 +70,11 @@ defmodule Alembic.AST do
   | `{:not, expr}` | negation | `not x` |
   | `{:range, from, to}` | range literal | `(1..5)` |
 
-  Output tags (`output_node()`) require a bare variable-path base,
-  optionally wrapped in a filter chain — a literal base like
-  `{{ "hi" | upcase }}` is rejected by `Alembic.Parser` with
-  `{:unsupported_output_expression, _}` (a constraint fixed by this
-  module's shape since Milestone 1.1, before the parser existed).
+  Output tags (`output_node()`) accept any expression whose base is a
+  variable path or a literal, optionally wrapped in a filter chain — so
+  `{{ name }}`, `{{ "hi" | upcase }}`, and `{{ 42 }}` all parse. Bases that
+  are comparisons, logical operators, or ranges (`{{ x > 1 }}`) are rejected
+  by `Alembic.Parser` with `{:unsupported_output_expression, _}`.
   """
 
   @type path_segment :: String.t() | {:dynamic, expr()}
@@ -93,13 +94,14 @@ defmodule Alembic.AST do
           | {:range, expr(), expr()}
   @type filter :: {:filter, String.t(), [expr()]}
   @type text_node :: {:text, String.t()}
-  @type output_node :: {:output, path(), [filter()]}
+  @type output_node :: {:output, expr()}
   @type if_node :: {:if, expr(), [ast_node()], [{expr(), [ast_node()]}], [ast_node()] | nil}
   @type for_node :: {:for, String.t(), expr(), [ast_node()], [ast_node()] | nil}
   @type assign_node :: {:assign, String.t(), expr()}
   @type extends_node :: {:extends, String.t()}
   @type block_node :: {:block, String.t(), [ast_node()]}
   @type include_node :: {:include, String.t(), map()}
+  @type render_node :: {:render, String.t(), map()}
   @type break_node :: {:break}
   @type continue_node :: {:continue}
   @type cycle_node :: {:cycle, String.t() | nil, [expr()]}
@@ -114,6 +116,7 @@ defmodule Alembic.AST do
           | extends_node()
           | block_node()
           | include_node()
+          | render_node()
           | break_node()
           | continue_node()
           | cycle_node()

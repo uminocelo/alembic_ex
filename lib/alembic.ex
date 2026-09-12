@@ -73,7 +73,7 @@ defmodule Alembic do
 
       iex> {:ok, ast} = Alembic.compile("Hello {{ name }}!")
       iex> ast
-      [{:text, "Hello "}, {:output, ["name"], []}, {:text, "!"}]
+      [{:text, "Hello "}, {:output, {:variable, ["name"]}}, {:text, "!"}]
 
       iex> Alembic.compile("{{ }}")
       {:error, {:lexer, {:empty_output_tag, %{line: 1, col: 1}}}}
@@ -91,7 +91,7 @@ defmodule Alembic do
   ## Examples
 
       iex> Alembic.compile!("Hello {{ name }}!")
-      [{:text, "Hello "}, {:output, ["name"], []}, {:text, "!"}]
+      [{:text, "Hello "}, {:output, {:variable, ["name"]}}, {:text, "!"}]
   """
   @spec compile!(String.t(), keyword()) :: AST.t()
   def compile!(source, opts \\ []) do
