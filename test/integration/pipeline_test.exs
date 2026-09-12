@@ -21,6 +21,27 @@ defmodule Alembic.Integration.PipelineTest do
                Alembic.render_string("{{ user.city }}", %{"user" => %{"city" => "Lisbon"}})
     end
 
+    test "literal output bases render their string form" do
+      assert {:ok, "42"} = Alembic.render_string("{{ 42 }}")
+      assert {:ok, "true"} = Alembic.render_string("{{ true }}")
+      assert {:ok, ""} = Alembic.render_string("{{ nil }}")
+      assert {:ok, "hi"} = Alembic.render_string(~s({{ "hi" }}))
+    end
+
+    test "filter chains over literals apply left-to-right" do
+      assert {:ok, "HI"} = Alembic.render_string(~s({{ "hi" | upcase }}))
+      assert {:ok, "HEL"} = Alembic.render_string(~s({{ "hello" | upcase | truncate: 3, "" }}))
+      assert {:ok, "a-b"} = Alembic.render_string(~s({{ "a,b" | split: "," | join: "-" }}))
+    end
+
+    test "comparison and logical output bases are rejected" do
+      assert {:error, {:parser, {:unsupported_output_expression, _raw}}} =
+               Alembic.render_string("{{ x > 1 }}")
+
+      assert {:error, {:parser, {:unsupported_output_expression, _raw}}} =
+               Alembic.render_string("{{ a and b }}")
+    end
+
     test "if with all branch combinations" do
       template = "{% if a %}A{% elsif b %}B{% elsif c %}C{% else %}D{% endif %}"
       assert {:ok, "A"} = Alembic.render_string(template, %{"a" => true})
@@ -97,6 +118,64 @@ defmodule Alembic.Integration.PipelineTest do
       template = ~s({% include "includes/header.html" with title: "Custom" %})
       assert {:ok, html} = Alembic.render_string(template, %{}, roots: [@templates_root])
       assert html =~ "<header>"
+    end
+  end
+
+  describe "render, isolated-scope partials" do
+    test "renders a partial with only its explicitly passed variables" do
+      template = ~s({% render "includes/render_name.html", name: "Bob" %})
+
+      assert {:ok, html} =
+               Alembic.render_string(template, %{"site" => %{"title" => "Parent"}},
+                 roots: [@templates_root]
+               )
+
+      assert html == "Name: Bob; site: \n"
+    end
+
+    test "parent variables with the same name do not leak into the partial" do
+      template = ~s({% render "includes/render_name.html" %})
+
+      assert {:ok, html} =
+               Alembic.render_string(
+                 template,
+                 %{
+                   "name" => "Parent",
+                   "site" => %{"title" => "Parent"}
+                 },
+                 roots: [@templates_root]
+               )
+
+      assert html == "Name: ; site: \n"
+    end
+
+    test "assignments inside the partial do not leak back to the parent" do
+      template = ~s({% render "includes/render_assign.html" %}{{ leaked }})
+
+      assert {:ok, html} = Alembic.render_string(template, %{}, roots: [@templates_root])
+      refute html =~ "set-in-render"
+      assert html == "\n"
+    end
+
+    test "nested render passes variables through the intermediate partial" do
+      template = ~s({% render "includes/render_outer.html", name: "Bob" %})
+
+      assert {:ok, html} = Alembic.render_string(template, %{}, roots: [@templates_root])
+      assert html == "[outer Name: Bob; site: \n]\n"
+    end
+
+    test "strict mode applies inside the partially rendered template" do
+      template = ~s({% render "includes/render_name.html" %})
+
+      assert {:error, {:evaluator, {:undefined_variable, ["name"]}}} =
+               Alembic.render_string(template, %{}, roots: [@templates_root], strict: true)
+    end
+
+    test "a missing template returns the include-style loader error" do
+      template = ~s({% render "nope.html" %})
+
+      assert {:error, {:evaluator, {:include_not_found, "nope.html", _reason}}} =
+               Alembic.render_string(template, %{}, roots: [@templates_root])
     end
   end
 end

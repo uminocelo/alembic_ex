@@ -14,9 +14,8 @@ defmodule Alembic.ASTTest do
     test "represents output paths and filters" do
       node = ASTFixtures.output_node()
 
-      assert {:output, path, filters} = node
-      assert path == ["user", "name"]
-      assert filters == [{:filter, "upcase", []}]
+      assert {:output, expr} = node
+      assert expr == {:filter_chain, {:variable, ["user", "name"]}, [{:filter, "upcase", []}]}
     end
   end
 
@@ -37,13 +36,16 @@ defmodule Alembic.ASTTest do
       assert {:for, variable, iterable, body, else_branch} = node
       assert variable == "post"
       assert iterable == {:variable, ["posts"]}
-      assert body == [{:output, ["post", "title"], []}]
+      assert body == [{:output, {:variable, ["post", "title"]}}]
       assert else_branch == [{:text, "No posts found"}]
     end
 
     test "allows nil else branch" do
       if_node = {:if, {:variable, ["user", "name"]}, [{:text, "Admininstrator"}], [], nil}
-      for_node = {:for, "post", {:variable, ["posts"]}, [{:output, ["posts", "title"], []}], nil}
+
+      for_node =
+        {:for, "post", {:variable, ["posts"]}, [{:output, {:variable, ["posts", "title"]}}], nil}
+
       assert {:if, _, _, [], nil} = if_node
       assert {:for, _, _, _, nil} = for_node
     end
@@ -65,10 +67,10 @@ defmodule Alembic.ASTTest do
     end
 
     test "named blocks with nested nodes" do
-      node = {:block, "content", [{:text, "Hello, "}, {:output, ["user", "name"], []}]}
+      node = {:block, "content", [{:text, "Hello, "}, {:output, {:variable, ["user", "name"]}}]}
 
       assert {:block, "content", body} = node
-      assert body == [{:text, "Hello, "}, {:output, ["user", "name"], []}]
+      assert body == [{:text, "Hello, "}, {:output, {:variable, ["user", "name"]}}]
     end
 
     test "includes  with variable" do
@@ -91,7 +93,7 @@ defmodule Alembic.ASTTest do
 
     assert [
              {:text, "Hello, "},
-             {:output, ["user", "name"], [{:filter, "upcase", []}]},
+             {:output, {:filter_chain, {:variable, ["user", "name"]}, [{:filter, "upcase", []}]}},
              {:if, _, _, _, _},
              {:for, _, _, _, _},
              {:include, "footer.html", %{}}

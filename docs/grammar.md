@@ -23,6 +23,7 @@ node         = text
              | block
              | extends
              | include
+             | render
              | break
              | continue
              | cycle
@@ -37,12 +38,13 @@ node         = text
    produces zero tokens, and a raw block collapses to a single TEXT_TOKEN. *)
 text         = TEXT_TOKEN ;
 
-(* Variable output: {{ expr }}. Filters are part of `expr` itself — see the
+(* Value output: {{ expr }}. Filters are part of `expr` itself — see the
    expression grammar in section 2 — not a separate trailing repetition, as
    an earlier draft of this grammar suggested (resolved in section 3.1). The
-   base of an output expression must be a bare variable path, optionally
-   wrapped in a filter chain: literal or comparison bases are rejected by
-   the parser with `{:unsupported_output_expression, raw}`. *)
+   base of an output expression must be a variable path or a literal,
+   optionally wrapped in a filter chain, so `{{ 42 }}` and
+   `{{ "hi" | upcase }}` are valid. Comparison/logical/range bases are
+   rejected by the parser with `{:unsupported_output_expression, raw}`. *)
 output       = OUTPUT_OPEN , expr , OUTPUT_CLOSE ;
 
 (* If / elsif* / else? / endif *)
@@ -70,11 +72,16 @@ block        = TAG_OPEN , "block" , IDENT , TAG_CLOSE
                , TAG_OPEN , "endblock" , TAG_CLOSE
                ;
 
-(* Partial inclusion *)
+(* Partial inclusion (shared scope) *)
 include      = TAG_OPEN , "include" , STRING
                , [ "with" , variable_list ]
                , TAG_CLOSE
                ;
+
+(* Modern partial rendering (isolated scope). The template name must be a
+   string literal — an unquoted name is a parse error. `for ... as` is not
+   supported. *)
+render       = TAG_OPEN , "render" , STRING , [ "," , variable_list ] , TAG_CLOSE ;
 
 (* Loop control: valid only inside a for_block body — enforced
    context-sensitively by the parser, like the "extends must be first"
@@ -210,13 +217,14 @@ Top-level node productions map onto `Alembic.AST.ast_node()` shapes:
 | Production | AST node |
 |---|---|
 | `text` | `{:text, content}` |
-| `output` | `{:output, path, filters}` — see the output-base restriction below |
+| `output` | `{:output, expr}` — the base must be a variable/literal (optionally filtered) |
 | `if_block` | `{:if, condition, then_branch, elsif_branches, else_branch}` |
 | `for_block` | `{:for, var, iterable, body, else_branch}` |
 | `assign` | `{:assign, var, expr}` |
 | `extends` | `{:extends, template_name}` |
 | `block` | `{:block, name, body}` |
 | `include` | `{:include, template_name, variables}` |
+| `render` | `{:render, template_name, variables}` |
 | `break` | `{:break}` |
 | `continue` | `{:continue}` |
 | `cycle` | `{:cycle, group, values}` — `group :: String.t() \| nil`, `values :: [expr()]` |
@@ -234,7 +242,7 @@ Top-level node productions map onto `Alembic.AST.ast_node()` shapes:
 |---|---|
 | `node` | `TEXT_TOKEN`, `OUTPUT_OPEN`, `TAG_OPEN` |
 | `output` | `OUTPUT_OPEN` |
-| `if_block` / `for_block` / `assign` / `extends` / `block` / `include` | `TAG_OPEN` (disambiguated by the keyword immediately inside — see below) |
+| `if_block` / `for_block` / `assign` / `extends` / `block` / `include` / `render` | `TAG_OPEN` (disambiguated by the keyword immediately inside — see below) |
 | `or_expr` → `and_expr` → `not_expr` → `comparison` → `filtered_primary` → `primary` | `IDENT`, `STRING`, `INTEGER`, `FLOAT`, `"true"`, `"false"`, `"nil"`, `"null"`, `"-"` (negative number), `"not"` |
 
 `node`'s three alternatives (`text`, `output`, tag-family) have disjoint
@@ -245,9 +253,9 @@ trivially at this level.
 
 ### Lookahead beyond 1 token: the tag keyword
 
-All seven tag-family productions (`if_block`, `for_block`, `assign`,
-`extends`, `block`, `include`, plus their `end*`/`elsif`/`else` continuation
-tags) share the same `TAG_OPEN` terminal. The Lexer does not split the tag
+All tag-family productions (`if_block`, `for_block`, `assign`,
+`extends`, `block`, `include`, `render`, plus their `end*`/`elsif`/`else`
+continuation tags) share the same `TAG_OPEN` terminal. The Lexer does not split the tag
 keyword out as a separate terminal — it hands the Parser one raw string
 (e.g. `"if user.admin"`). The Parser resolves this by pattern-matching the
 **string prefix** of that raw content (`"if " <> condition`, `"for " <>
@@ -303,7 +311,7 @@ template
   {:for, "post", {:variable, ["site", "posts"]},
     [
       {:text, "\n  <h2>"},
-      {:output, ["post", "title"], [{:filter, "upcase", []}]},
+      {:output, {:filter_chain, {:variable, ["post", "title"]}, [{:filter, "upcase", []}]}},
       {:text, "</h2>\n  "},
       {:if, {:variable, ["post", "featured"]},
         [{:text, "★"}],

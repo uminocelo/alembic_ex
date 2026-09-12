@@ -42,6 +42,7 @@ defmodule Alembic.Parser do
           | {:malformed_assign, term()}
           | {:malformed_extends, term()}
           | {:malformed_include, term()}
+          | {:malformed_render, term()}
           | {:unexpected_tag, String.t()}
           | {:break_outside_loop, Token.position()}
           | {:continue_outside_loop, Token.position()}
@@ -258,15 +259,21 @@ defmodule Alembic.Parser do
     dispatch_tag(content, rest, pos, in_loop?)
   end
 
-  defp output_node_from_expr({:variable, path}, _raw, rest), do: {:ok, {:output, path, []}, rest}
-
-  defp output_node_from_expr({:filter_chain, {:variable, path}, filters}, _raw, rest) do
-    {:ok, {:output, path, filters}, rest}
+  # An output tag accepts any expression whose base is a variable path or a
+  # literal, optionally wrapped in a filter chain. Comparison/logical/range
+  # bases stay rejected — `{{ x > 1 }}` is not a value output.
+  defp output_node_from_expr(expr, raw, rest) do
+    if output_base?(expr) do
+      {:ok, {:output, expr}, rest}
+    else
+      {:error, {:unsupported_output_expression, raw}}
+    end
   end
 
-  defp output_node_from_expr(_other, raw, _rest) do
-    {:error, {:unsupported_output_expression, raw}}
-  end
+  defp output_base?({:variable, _path}), do: true
+  defp output_base?({:literal, _value}), do: true
+  defp output_base?({:filter_chain, base, _filters}), do: output_base?(base)
+  defp output_base?(_other), do: false
 
   # ---- Tag keyword dispatch (tag content is already trimmed by the Lexer) ----
 
@@ -283,6 +290,9 @@ defmodule Alembic.Parser do
     do: parse_block(String.trim(name), rest, pos, in_loop?)
 
   defp dispatch_tag("include " <> raw, rest, _pos, _in_loop?), do: parse_include(raw, rest)
+
+  defp dispatch_tag("render", _rest, _pos, _in_loop?), do: {:error, {:malformed_render, :empty}}
+  defp dispatch_tag("render " <> raw, rest, _pos, _in_loop?), do: parse_render(raw, rest)
   defp dispatch_tag("cycle", _rest, _pos, _in_loop?), do: {:error, {:malformed_cycle, :empty}}
   defp dispatch_tag("cycle " <> spec, rest, _pos, _in_loop?), do: parse_cycle(spec, rest)
 
@@ -481,29 +491,59 @@ defmodule Alembic.Parser do
     end
   end
 
-  defp parse_include_variables(raw) do
+  # ---- Render ----
+
+  defp parse_render(raw, tokens) do
+    case String.split(raw, ",", parts: 2) do
+      [name_raw] ->
+        with {:ok, name} <- parse_render_name(name_raw) do
+          {:ok, {:render, name, %{}}, tokens}
+        end
+
+      [name_raw, vars_raw] ->
+        with {:ok, name} <- parse_render_name(name_raw),
+             {:ok, variables} <- parse_variables(vars_raw, :render) do
+          {:ok, {:render, name, variables}, tokens}
+        end
+    end
+  end
+
+  defp parse_render_name(raw) do
+    case Expression.parse(String.trim(raw)) do
+      {:ok, {:literal, name}} when is_binary(name) -> {:ok, name}
+      {:ok, _other} -> {:error, {:malformed_render, raw}}
+      {:error, reason} -> {:error, {:malformed_render, reason}}
+    end
+  end
+
+  defp parse_include_variables(raw), do: parse_variables(raw, :include)
+
+  defp parse_variables(raw, tag) do
     raw
     |> split_top_level_commas()
     |> Enum.reduce_while({:ok, %{}}, fn pair_raw, {:ok, acc} ->
-      case parse_assignment_pair(pair_raw) do
+      case parse_assignment_pair(pair_raw, tag) do
         {:ok, key, expr} -> {:cont, {:ok, Map.put(acc, key, expr)}}
         {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
   end
 
-  defp parse_assignment_pair(pair_raw) do
+  defp parse_assignment_pair(pair_raw, tag) do
     case String.split(pair_raw, ":", parts: 2) do
       [key_raw, value_raw] ->
         case Expression.parse(value_raw) do
           {:ok, expr} -> {:ok, String.trim(key_raw), expr}
-          {:error, reason} -> {:error, {:malformed_include, reason}}
+          {:error, reason} -> {:error, malformed_variables(tag, reason)}
         end
 
       _other ->
-        {:error, {:malformed_include, pair_raw}}
+        {:error, malformed_variables(tag, pair_raw)}
     end
   end
+
+  defp malformed_variables(:include, reason), do: {:malformed_include, reason}
+  defp malformed_variables(:render, reason), do: {:malformed_render, reason}
 
   defp split_top_level_commas(str), do: split_top_level_commas(str, [], [], nil)
 

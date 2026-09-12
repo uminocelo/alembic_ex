@@ -43,8 +43,9 @@ defmodule Alembic.Inheritance do
   - `collect_blocks/1` returns `{:ok, map} | {:error, {:duplicate_block,
     name}}`, not a bare map — the issue's own task list requires erroring on
     a duplicate block name, which a bare-map return type cannot express.
-  - `block.super` substitution is shallow: only `{:output, ["block",
-    "super"], []}` nodes directly in an override's own body are replaced —
+  - `block.super` substitution is shallow: only
+    `{:output, {:variable, ["block", "super"]}}` nodes directly in an
+    override's own body are replaced —
     it does not recurse into nested `if`/`for` branches inside that
     override. This matches the issue's own worked example, which only shows
     top-level usage.
@@ -126,7 +127,7 @@ defmodule Alembic.Inheritance do
       iex> {:ok, tokens} = Alembic.Lexer.tokenize("hello {{ name }}")
       iex> {:ok, ast} = Alembic.Parser.parse(tokens)
       iex> Alembic.Inheritance.preprocess(ast, fn _ -> {:error, :unused} end)
-      {:ok, [{:text, "hello "}, {:output, ["name"], []}]}
+      {:ok, [{:text, "hello "}, {:output, {:variable, ["name"]}}]}
   """
   @spec preprocess([AST.ast_node()], loader_fn()) :: {:ok, [AST.ast_node()]} | {:error, reason()}
   def preprocess(ast, loader_fn) do
@@ -237,7 +238,7 @@ defmodule Alembic.Inheritance do
 
   defp substitute_block_super(override_body, default_body) do
     Enum.flat_map(override_body, fn
-      {:output, ["block", "super"], []} -> default_body
+      {:output, {:variable, ["block", "super"]}} -> default_body
       other -> [other]
     end)
   end

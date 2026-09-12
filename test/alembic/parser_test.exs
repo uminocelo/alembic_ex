@@ -21,30 +21,43 @@ defmodule Alembic.ParserTest do
     end
 
     test "simple output" do
-      assert {:ok, [{:output, ["name"], []}]} = parse("{{ name }}")
+      assert {:ok, [{:output, {:variable, ["name"]}}]} = parse("{{ name }}")
     end
 
     test "dot-path output" do
-      assert {:ok, [{:output, ["user", "name"], []}]} = parse("{{ user.name }}")
+      assert {:ok, [{:output, {:variable, ["user", "name"]}}]} = parse("{{ user.name }}")
     end
 
     test "output with a filter chain" do
-      assert {:ok, [{:output, ["name"], [{:filter, "upcase", []}]}]} =
+      assert {:ok, [{:output, {:filter_chain, {:variable, ["name"]}, [{:filter, "upcase", []}]}}]} =
                parse("{{ name | upcase }}")
     end
 
-    test "output with a non-variable base is rejected" do
-      assert {:error, {:unsupported_output_expression, _raw}} = parse(~s({{ "literal" }}))
+    test "output with a literal base is allowed" do
+      assert {:ok, [{:output, {:literal, "literal"}}]} = parse(~s({{ "literal" }}))
+      assert {:ok, [{:output, {:literal, 42}}]} = parse("{{ 42 }}")
+    end
+
+    test "output with a literal filter-chain base is allowed" do
+      assert {:ok, [{:output, {:filter_chain, {:literal, "hi"}, [{:filter, "upcase", []}]}}]} =
+               parse(~s({{ "hi" | upcase }}))
+    end
+
+    test "output with a comparison or logical base is rejected" do
+      assert {:error, {:unsupported_output_expression, _raw}} = parse("{{ x > 1 }}")
+      assert {:error, {:unsupported_output_expression, _raw}} = parse("{{ a and b }}")
     end
   end
 
   describe "whitespace control" do
     test "strip_left trims trailing whitespace off the preceding text" do
-      assert {:ok, [{:text, "Hello"}, {:output, ["name"], []}]} = parse("Hello   {{- name }}")
+      assert {:ok, [{:text, "Hello"}, {:output, {:variable, ["name"]}}]} =
+               parse("Hello   {{- name }}")
     end
 
     test "strip_right trims leading whitespace off the following text" do
-      assert {:ok, [{:output, ["name"], []}, {:text, "World"}]} = parse("{{ name -}}   World")
+      assert {:ok, [{:output, {:variable, ["name"]}}, {:text, "World"}]} =
+               parse("{{ name -}}   World")
     end
 
     test "strip on both sides of a tag trims both neighbors" do
@@ -53,11 +66,11 @@ defmodule Alembic.ParserTest do
     end
 
     test "no adjacent text token is a no-op, not an error" do
-      assert {:ok, [{:output, ["name"], []}]} = parse("{{- name -}}")
+      assert {:ok, [{:output, {:variable, ["name"]}}]} = parse("{{- name -}}")
     end
 
     test "without strip markers, surrounding whitespace is preserved" do
-      assert {:ok, [{:text, "Hello   "}, {:output, ["name"], []}, {:text, "   World"}]} =
+      assert {:ok, [{:text, "Hello   "}, {:output, {:variable, ["name"]}}, {:text, "   World"}]} =
                parse("Hello   {{ name }}   World")
     end
   end
@@ -89,7 +102,7 @@ defmodule Alembic.ParserTest do
 
   describe "for block" do
     test "for with output body, forloop metadata accessible as a path" do
-      assert {:ok, [{:for, "item", {:variable, ["list"]}, [{:output, ["item"], []}], nil}]} =
+      assert {:ok, [{:for, "item", {:variable, ["list"]}, [{:output, {:variable, ["item"]}}], nil}]} =
                parse("{% for item in list %}{{ item }}{% endfor %}")
     end
 
@@ -122,7 +135,7 @@ defmodule Alembic.ParserTest do
 
   describe "assign tag" do
     test "parses assign and makes the value available to later output" do
-      assert {:ok, [{:assign, "x", {:literal, 5}}, {:output, ["x"], []}]} =
+      assert {:ok, [{:assign, "x", {:literal, 5}}, {:output, {:variable, ["x"]}}]} =
                parse("{% assign x = 5 %}{{ x }}")
     end
 
@@ -166,6 +179,33 @@ defmodule Alembic.ParserTest do
                parse(~s({% include "header.html" with title: "Hello", count: 3 %}))
 
       assert variables == %{"title" => {:literal, "Hello"}, "count" => {:literal, 3}}
+    end
+  end
+
+  describe "render tag" do
+    test "render without variables" do
+      assert {:ok, [{:render, "card.html", %{}}]} = parse(~s({% render "card.html" %}))
+    end
+
+    test "render with variables" do
+      assert {:ok, [{:render, "card.html", variables}]} =
+               parse(~s({% render "card.html", title: "Hello", count: 3 %}))
+
+      assert variables == %{"title" => {:literal, "Hello"}, "count" => {:literal, 3}}
+    end
+
+    test "render variable values may be expressions" do
+      assert {:ok, [{:render, "card.html", %{"title" => {:variable, ["post", "title"]}}}]} =
+               parse(~s({% render "card.html", title: post.title %}))
+    end
+
+    test "an unquoted template name is a parse error" do
+      assert {:error, {:malformed_render, _}} = parse("{% render card.html %}")
+      assert {:error, {:malformed_render, _}} = parse("{% render card %}")
+    end
+
+    test "an empty render tag is a parse error" do
+      assert {:error, {:malformed_render, :empty}} = parse("{% render %}")
     end
   end
 
@@ -324,7 +364,7 @@ defmodule Alembic.ParserTest do
     end
 
     test "capture body may contain other nodes" do
-      assert {:ok, [{:capture, "x", [{:output, ["name"], []}, {:text, "!"}]}]} =
+      assert {:ok, [{:capture, "x", [{:output, {:variable, ["name"]}}, {:text, "!"}]}]} =
                parse("{% capture x %}{{ name }}!{% endcapture %}")
     end
 
@@ -421,7 +461,8 @@ defmodule Alembic.ParserTest do
                 {:for, "post", {:variable, ["site", "posts"]},
                  [
                    {:text, "\n  <h2>"},
-                   {:output, ["post", "title"], [{:filter, "upcase", []}]},
+                   {:output,
+                    {:filter_chain, {:variable, ["post", "title"]}, [{:filter, "upcase", []}]}},
                    {:text, "</h2>\n  "},
                    {:if, {:variable, ["post", "featured"]}, [{:text, "★"}], [], nil},
                    {:text, "\n"}

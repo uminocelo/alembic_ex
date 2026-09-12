@@ -5,7 +5,7 @@ defmodule Alembic.ASTFixtures do
 
   @spec output_node() :: AST.output_node()
   def output_node do
-    {:output, ["user", "name"], [{:filter, "upcase", []}]}
+    {:output, {:filter_chain, {:variable, ["user", "name"]}, [{:filter, "upcase", []}]}}
   end
 
   @spec if_node() :: AST.if_node()
@@ -28,7 +28,7 @@ defmodule Alembic.ASTFixtures do
 
   @spec for_node() :: AST.for_node()
   def for_node do
-    {:for, "post", {:variable, ["posts"]}, [{:output, ["post", "title"], []}],
+    {:for, "post", {:variable, ["posts"]}, [{:output, {:variable, ["post", "title"]}}],
      [{:text, "No posts found"}]}
   end
 

@@ -3,13 +3,62 @@
 All notable changes to this project are documented in this file, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.2.0] - 2026-09-12
+
+### Added
+
+- **Loop control** — `{% break %}` and `{% continue %}` inside a
+  `{% for %}` body (parse errors anywhere else); `{% break %}` exits only
+  the innermost loop.
+- **Cycle** — `{% cycle "a", "b" %}` round-robins its values on each render,
+  and `{% cycle "rows": "a", "b" %}` shares state across same-named groups.
+- **Range iterables** — `{% for i in (1..5) %}` with integer or variable
+  endpoints. Descending ranges iterate zero times and trigger `{% else %}`,
+  matching Liquid rather than Elixir's descending ranges.
+- **Capture** — `{% capture x %}...{% endcapture %}` renders its body into a
+  flattened string stored in `x`, with the same visibility as `{% assign %}`.
+- **Unless** — `{% unless expr %}` / `{% else %}` / `{% endunless %}`,
+  desugared by the parser to a negated `{% if %}`. `{% elsif %}` inside an
+  unless is a parse error, matching Liquid.
+- **Case/when** — `{% case subject %}` with `{% when a, b, c %}` (multiple
+  values per when) and an optional `{% else %}`, terminated by
+  `{% endcase %}`. Matching reuses the evaluator's `==` semantics, so
+  `{% when empty %}` works.
+- **`empty` / `blank` keywords** — contextual comparison operands
+  (`x == empty`, `x != blank`, either operand order). `empty` matches `""`,
+  `[]`, and `%{}` (`nil` is *not* empty); `blank` also matches `nil`,
+  `false`, and whitespace-only strings. They are equality-only: other
+  operators raise `{:keyword_requires_equality, _, _}`.
+- **Dynamic bracket access** — `items[key]`, `a[b.c]`, and
+  `items[forloop.index0]` evaluate the bracketed expression against the
+  current context before lookup. A segment resolving to anything other than
+  a string or integer is a render error; strict mode reports the fully
+  resolved path.
+- **`{% render %}`** — `{% render "card.html" %}` and
+  `{% render "card.html", title: post.title %}` render a partial in an
+  *isolated* scope: only the explicitly passed variables are visible, parent
+  scopes/assigns never leak in, and the partial's own assignments do not leak
+  out. `loader_fn`, `strict`, and `custom_filters` still carry over from the
+  parent. The `for ... as` variant is not supported.
+- **Literal output bases** — output tags now accept a literal or a filter
+  chain over a literal/variable, so `{{ 42 }}`, `{{ "hi" }}`, and
+  `{{ "hi" | upcase }}` render. Comparison/logical bases (`{{ x > 1 }}`)
+  remain rejected.
 
 ### Changed
 
-- Added Liquid-compatible contextual `empty`/`blank` comparisons, dynamic
-  bracket access (`items[key]`), and array `slice` support; documented the
-  array-vs-string out-of-range behavior for `slice`.
+- **`slice` now slices arrays as well as strings**, removing a documented
+  deviation from upstream Liquid. Positive and negative start offsets are
+  supported, with or without a length; an out-of-range start returns `[]`
+  for arrays and `""` for strings. Existing string behavior is unchanged.
+- Output nodes are now `{:output, expr}` rather than
+  `{:output, path, filters}`, so the base can be a variable, a literal, or a
+  filter chain. This is an AST-level change; callers constructing output
+  nodes directly must update. `{{ block.super }}` is now
+  `{:output, {:variable, ["block", "super"]}}`.
+- `COMPATIBILITY.md`, `docs/grammar.md`, and the AST moduledoc document the
+  new tags, keywords, and output-base rules; the `slice` and output-base
+  deviation rows are removed.
 
 ## [0.1.1] - 2026-09-06
 

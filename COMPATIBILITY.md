@@ -16,7 +16,10 @@ hand-written in `test/integration/liquid_compat_test.exs`.
 ## Supported Liquid features
 
 - **Output tags** — `{{ user.name }}`, dot-path and bracket (`user["name"]`)
-  variable access, both interchangeable.
+  variable access, both interchangeable. The base may also be a literal
+  (`{{ 42 }}`, `{{ "hi" }}`) or a filter chain over a literal/variable
+  (`{{ "hi" | upcase }}`); comparison and logical bases (`{{ x > 1 }}`) are
+  still rejected.
 - **Filters** — full pipe chain syntax (`{{ x | a | b: 1, 2 }}`); see
   `Alembic.Filters` for the complete catalog (string, array, number, misc).
   `slice` slices both strings and arrays (positive/negative start, optional
@@ -63,6 +66,12 @@ hand-written in `test/integration/liquid_compat_test.exs`.
   `{% include "partial.html" with key: val, key2: val2 %}`, sharing the
   including template's scope (classic `include` semantics, not an isolated
   `render`).
+- **Render** — `{% render "card.html" %}` and
+  `{% render "card.html", title: post.title %}` render a partial in an
+  *isolated* scope: only the explicitly passed variables are visible, parent
+  scopes/assigns never leak in, and anything the partial assigns does not
+  leak out. `loader_fn`, `strict`, and `custom_filters` carry over from the
+  parent. The `for ... as` variant is not supported.
 - **Liquid truthiness** — only `nil` and `false` are falsy; `0`, `""`, and
   `[]` are all truthy, matching Liquid (not Elixir's own truthiness rules).
 
@@ -74,7 +83,6 @@ hand-written in `test/integration/liquid_compat_test.exs`.
 | `url_encode` / `url_decode` | `URI.encode_www_form/1` (space → `+`) | same (`+` for space) | Matches Liquid; `URI.encode/1` (percent-encodes space as `%20`) would not have |
 | `ceil` / `floor` | return integers | return integers | Matches Liquid; Elixir's own `Float.ceil/1` returns a float, so this required an explicit `trunc/1` |
 | `date` filter | Elixir `Calendar.strftime/2` format strings | Ruby `strftime` format strings | No Ruby-compatible formatter available without a dependency; the two format-string dialects are similar but not identical |
-| Output tag base expression | must be a bare variable path (optionally filtered) | any expression, including literals | `Alembic.AST.output_node`'s type (`{:output, path(), [filter()]}`) was fixed in Milestone 1.1, before the parser existed; `{{ "literal" \| filter }}` returns `{:error, {:unsupported_output_expression, _}}` |
 | Cache hit/miss telemetry | `Logger.debug/1` | n/a | `:telemetry` is a separate Hex package; issue 1.1.1's zero-runtime-deps policy (ex_doc only) rules it out |
 
 ## Unsupported features (out of MVP scope)
@@ -84,8 +92,6 @@ hand-written in `test/integration/liquid_compat_test.exs`.
 - Liquid's built-in request/shop/theme objects (`request`, `shop`, `theme`,
   etc.) — Alembic has no notion of these; all context comes from the
   `assigns` map passed to `render/3`
-- `{% render %}` (isolated-scope include) — only classic `{% include %}`
-  (shared scope) exists
 - `{% increment %}`, `{% decrement %}` tags
 - Liquid's `{% liquid %}` shorthand block syntax
 - Multi-argument `{% assign %}` expressions beyond a single filter chain
