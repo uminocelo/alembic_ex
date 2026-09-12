@@ -20,7 +20,8 @@ hand-written in `test/integration/liquid_compat_test.exs`.
 - **Filters** — full pipe chain syntax (`{{ x | a | b: 1, 2 }}`); see
   `Alembic.Filters` for the complete catalog (string, array, number, misc).
   `slice` slices both strings and arrays (positive/negative start, optional
-  length, out-of-range start returns `[]`).
+  length). For arrays, an out-of-range start returns `[]`; for strings it
+  returns `""` (via `String.slice/3`).
 - **Control flow** — `{% if %}` / `{% elsif %}` / `{% else %}` /
   `{% endif %}`, `{% for %}` / `{% else %}` / `{% endfor %}` with full
   `forloop` metadata (`index`, `index0`, `rindex`, `rindex0`, `first`,

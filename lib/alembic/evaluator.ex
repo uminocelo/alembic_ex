@@ -311,7 +311,7 @@ defmodule Alembic.Evaluator do
   # the unevaluated dynamic nodes.
   defp resolve_or_error(ctx, path) do
     with {:ok, resolved} <- resolve_path_segments(path, ctx, []) do
-      case Context.resolve_path(ctx, Enum.map(resolved, &segment_key/1)) do
+      case Context.resolve_path(ctx, resolved) do
         {:ok, value} -> {:ok, value}
         :not_found when ctx.strict -> {:error, {:undefined_variable, resolved}}
         :not_found -> {:ok, nil}
@@ -337,9 +337,6 @@ defmodule Alembic.Evaluator do
       {:error, reason} -> {:error, reason}
     end
   end
-
-  defp segment_key(segment) when is_integer(segment), do: Integer.to_string(segment)
-  defp segment_key(segment), do: segment
 
   # ---- Expression evaluation ----
 

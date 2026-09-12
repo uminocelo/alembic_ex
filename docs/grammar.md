@@ -166,10 +166,10 @@ FLOAT        = INTEGER , "." , digit , { digit } ;
 ### Contextual keywords `empty` / `blank`
 
 `empty` and `blank` are **contextual** keywords, not reserved words. A bare
-`empty`/`blank` appearing as a comparison operand — on either side of `==` or
-`!=` — is interpreted as the keyword. Everywhere else (as an output base, an
-`assign` RHS, an argument, or with an ordering/`contains` operator) the
-bareword remains an ordinary variable path. They are equality-only operands:
+`empty`/`blank` appearing as a comparison operand (with any comparison
+operator) is interpreted as the keyword. Everywhere else (as an output base,
+an `assign` RHS, or an argument) the bareword remains an ordinary variable
+path. They are equality-only operands:
 `x > empty` parses but fails to render with
 `{:error, {:keyword_requires_equality, op, keyword}}`.
 

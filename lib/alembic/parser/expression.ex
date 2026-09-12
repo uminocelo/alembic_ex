@@ -16,9 +16,11 @@ defmodule Alembic.Parser.Expression do
       filter           = "|" , IDENT , [ ":" , expr , { "," , expr } ] ;
 
   The barewords `empty` and `blank` are *contextual* keywords: a bare
-  `empty`/`blank` used as a comparison operand (on either side of `==` or
-  `!=`) parses to `{:keyword, :empty}` / `{:keyword, :blank}`. Everywhere else
-  it stays an ordinary variable path, so `{{ empty }}` and
+  `empty`/`blank` used as a comparison operand (for any comparison operator)
+  parses to `{:keyword, :empty}` / `{:keyword, :blank}`. They are still
+  equality-only at render time (`==`/`!=`); other operators return
+  `{:keyword_requires_equality, ...}`. Outside comparison operands, bare
+  `empty`/`blank` stay ordinary variable paths, so `{{ empty }}` and
   `{% assign empty = 1 %}` still resolve a variable named `empty`.
 
   Filters bind tighter than comparison and logical operators — this lets a
@@ -311,6 +313,9 @@ defmodule Alembic.Parser.Expression do
 
       {:ok, _expr, [token | _rest]} ->
         {:error, {:unexpected_token, token}}
+
+      {:ok, _expr, []} ->
+        {:error, {:unexpected_token, :eof}}
 
       {:error, reason} ->
         {:error, reason}

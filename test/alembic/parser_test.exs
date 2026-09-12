@@ -360,6 +360,10 @@ defmodule Alembic.ParserTest do
   end
 
   describe "case/when tag" do
+    test "case with no subject is a parse error" do
+      assert {:error, {:malformed_case, :empty}} = parse("{% case %}")
+    end
+
     test "single-value when with else" do
       assert {:ok, [{:case, {:variable, ["x"]}, [{[{:literal, 1}], [{:text, "one"}]}], _else}]} =
                parse("{% case x %}{% when 1 %}one{% else %}other{% endcase %}")

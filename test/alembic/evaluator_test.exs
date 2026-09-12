@@ -59,6 +59,10 @@ defmodule Alembic.EvaluatorTest do
       assert {:ok, "b"} = render("{{ items[i] }}", %{"items" => ["a", "b", "c"], "i" => 1})
     end
 
+    test "map key via an integer variable preserves integer-keyed lookups" do
+      assert {:ok, "one"} = render("{{ data[key] }}", %{"data" => %{1 => "one"}, "key" => 1})
+    end
+
     test "list index via forloop.index0" do
       template = "{% for x in items %}{{ items[forloop.index0] }}{% endfor %}"
       assert {:ok, "abc"} = render(template, %{"items" => ["a", "b", "c"]})

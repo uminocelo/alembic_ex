@@ -286,6 +286,10 @@ defmodule Alembic.Parser.ExpressionTest do
       assert {:error, :empty_expression} = Expression.parse("   ")
     end
 
+    test "unterminated dynamic bracket key returns a structured parser error" do
+      assert {:error, {:unexpected_token, :eof}} = Expression.parse("items[key")
+    end
+
     test "filter without a name" do
       assert {:error, :missing_filter_name} = Expression.parse("name | ")
     end
