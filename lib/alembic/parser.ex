@@ -416,7 +416,7 @@ defmodule Alembic.Parser do
   defp parse_case_else(_whens, tokens, in_loop?), do: parse_optional_else(tokens, in_loop?)
 
   defp parse_when_values(raw) do
-    case Expression.parse_list(raw) do
+    case Expression.parse_keyword_list(raw) do
       {:ok, values} -> {:ok, values}
       {:error, reason} -> {:error, {:malformed_when, {String.trim(raw), reason}}}
     end
