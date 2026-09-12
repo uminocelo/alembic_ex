@@ -294,6 +294,8 @@ defmodule Alembic.Parser do
   defp dispatch_tag("unless " <> condition_raw, rest, pos, in_loop?),
     do: parse_unless(condition_raw, rest, pos, in_loop?)
 
+  defp dispatch_tag("case", _rest, _pos, _in_loop?), do: {:error, {:malformed_case, :empty}}
+
   defp dispatch_tag("case " <> subject_raw, rest, pos, in_loop?),
     do: parse_case(subject_raw, rest, pos, in_loop?)
 
