@@ -239,7 +239,7 @@ the producing module's `@type reason :: ...`.
 
 ### 7.1 Test structure
 
-- Every test file starts with `doctest <Module>`.
+- Test files for modules with doctest examples include `doctest <Module>`; integration and fixture tests may omit it.
 - Use private helper functions for repeated setup, not `setup`/`setup_all`
   blocks (this is the established convention).
 - `describe` blocks group by feature, not by function arity.
