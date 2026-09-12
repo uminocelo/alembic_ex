@@ -294,8 +294,6 @@ defmodule Alembic.Parser do
   defp dispatch_tag("unless " <> condition_raw, rest, pos, in_loop?),
     do: parse_unless(condition_raw, rest, pos, in_loop?)
 
-  defp dispatch_tag("case", _rest, _pos, _in_loop?), do: {:error, {:malformed_case, :empty}}
-
   defp dispatch_tag("case " <> subject_raw, rest, pos, in_loop?),
     do: parse_case(subject_raw, rest, pos, in_loop?)
 
@@ -350,10 +348,6 @@ defmodule Alembic.Parser do
 
   # ---- Capture - name / body / endcapture ----
 
-  # The grammar declares the capture name as a single IDENT, so validate it
-  # with the expression parser rather than accepting any trimmed string —
-  # otherwise `{% capture foo.bar %}` would store a value under a key no
-  # output path can resolve.
   defp parse_capture(name, tokens, pos, in_loop?) do
     case Expression.parse(name) do
       {:ok, {:variable, [name]}} ->

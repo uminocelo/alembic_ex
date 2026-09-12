@@ -22,6 +22,26 @@ defmodule Alembic.Parser.ExpressionTest do
       assert Expression.parse("user.name") == Expression.parse(~s(user["name"]))
     end
 
+    test "dynamic bracket segment from a variable" do
+      assert {:ok, {:variable, ["user", {:dynamic, {:variable, ["key"]}}]}} =
+               Expression.parse("user[key]")
+    end
+
+    test "dynamic bracket segment from a nested path" do
+      assert {:ok, {:variable, ["a", {:dynamic, {:variable, ["b", "c"]}}]}} =
+               Expression.parse("a[b.c]")
+    end
+
+    test "dynamic bracket segment mixed with static segments" do
+      assert {:ok, {:variable, ["posts", {:dynamic, {:variable, ["i"]}}, "title"]}} =
+               Expression.parse("posts[i].title")
+    end
+
+    test "string and integer bracket keys stay static" do
+      assert {:ok, {:variable, ["user", "name"]}} = Expression.parse(~s(user["name"]))
+      assert {:ok, {:variable, ["items", "2"]}} = Expression.parse("items[2]")
+    end
+
     test "disallows empty path segments" do
       assert {:error, {:unexpected_token, :dotdot}} =
                Expression.parse("user..name")
@@ -88,6 +108,57 @@ defmodule Alembic.Parser.ExpressionTest do
     test "contains operator" do
       assert {:ok, {:compare, :contains, {:variable, ["s"]}, {:literal, "hello"}}} =
                Expression.parse(~s(s contains "hello"))
+    end
+  end
+
+  describe "empty and blank keywords" do
+    test "bare empty/blank as the right-hand operand" do
+      assert {:ok, {:compare, :eq, {:variable, ["x"]}, {:keyword, :empty}}} =
+               Expression.parse("x == empty")
+
+      assert {:ok, {:compare, :neq, {:variable, ["x"]}, {:keyword, :blank}}} =
+               Expression.parse("x != blank")
+    end
+
+    test "bare empty/blank as the left-hand operand (reversed order)" do
+      assert {:ok, {:compare, :eq, {:keyword, :empty}, {:variable, ["x"]}}} =
+               Expression.parse("empty == x")
+
+      assert {:ok, {:compare, :neq, {:keyword, :blank}, {:variable, ["x"]}}} =
+               Expression.parse("blank != x")
+    end
+
+    test "keywords combine with logical operators" do
+      assert {:ok, {:logical, :and, {:compare, :eq, _, {:keyword, :empty}}, {:variable, ["y"]}}} =
+               Expression.parse("x == empty and y")
+    end
+
+    test "empty/blank with an ordering operator still parse (evaluator errors later)" do
+      assert {:ok, {:compare, :gt, {:variable, ["x"]}, {:keyword, :empty}}} =
+               Expression.parse("x > empty")
+    end
+
+    test "a bare empty/blank with no comparison stays a variable path" do
+      assert {:ok, {:variable, ["empty"]}} = Expression.parse("empty")
+      assert {:ok, {:variable, ["blank"]}} = Expression.parse("blank")
+    end
+
+    test "a filtered empty is not the keyword" do
+      assert {:ok, {:filter_chain, {:variable, ["empty"]}, [{:filter, "upcase", []}]}} =
+               Expression.parse("empty | upcase")
+    end
+
+    test "a longer path rooted at empty is not the keyword" do
+      assert {:ok, {:variable, ["empty", "name"]}} = Expression.parse("empty.name")
+    end
+
+    test "parse_keyword_list treats bare empty/blank as keywords" do
+      assert {:ok, [{:keyword, :empty}, {:literal, "x"}, {:keyword, :blank}]} =
+               Expression.parse_keyword_list(~s(empty, "x", blank))
+    end
+
+    test "parse_list leaves bare empty/blank as variables" do
+      assert {:ok, [{:variable, ["empty"]}]} = Expression.parse_list("empty")
     end
   end
 

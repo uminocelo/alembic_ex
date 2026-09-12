@@ -38,9 +38,10 @@ defmodule Alembic.Filters do
   coerce via `Integer.to_string/1` / `Float.to_string/1` / `to_string/1`;
   anything else falls back to `inspect/1` rather than raising.
 
-  `slice` also coerces its input via `coerce_to_string/1` — unlike upstream
-  Liquid, it does not support slicing arrays, only strings (see
-  `COMPATIBILITY.md`).
+  `slice` slices lists natively (positive or negative start, optional
+  length, out-of-range start returns `[]`, matching Liquid). Any non-list
+  input is coerced via `coerce_to_string/1` and sliced as a string, so its
+  string behavior is unchanged.
 
   ### Coerces to a number (`coerce_to_number/1`)
 
@@ -239,6 +240,12 @@ defmodule Alembic.Filters do
 
   defp apply_builtin("size", value, []) when is_binary(value), do: {:ok, String.length(value)}
   defp apply_builtin("size", value, []) when is_list(value), do: {:ok, length(value)}
+
+  defp apply_builtin("slice", value, [offset]) when is_list(value),
+    do: {:ok, slice_list(value, offset, 1)}
+
+  defp apply_builtin("slice", value, [offset, length]) when is_list(value),
+    do: {:ok, slice_list(value, offset, length)}
 
   defp apply_builtin("slice", value, [offset]),
     do: {:ok, String.slice(coerce_to_string(value), offset, 1)}
@@ -458,6 +465,23 @@ defmodule Alembic.Filters do
     to_string(value)
   rescue
     Protocol.UndefinedError -> inspect(value)
+  end
+
+  # Liquid's Array#slice semantics: a negative offset counts back from the
+  # end, and an offset that falls outside the list yields [] (Elixir's
+  # Enum.slice/3 would instead clamp such an offset to the nearest element).
+  defp slice_list(list, offset, length) do
+    offset = trunc(coerce_to_number(offset))
+    length = trunc(coerce_to_number(length))
+    size = length(list)
+    start = if offset < 0, do: size + offset, else: offset
+
+    cond do
+      length <= 0 -> []
+      start < 0 -> []
+      start >= size -> []
+      true -> Enum.slice(list, start, length)
+    end
   end
 
   defp coerce_to_number(value) when is_number(value), do: value
