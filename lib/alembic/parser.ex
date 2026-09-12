@@ -350,10 +350,6 @@ defmodule Alembic.Parser do
 
   # ---- Capture - name / body / endcapture ----
 
-  # The grammar declares the capture name as a single IDENT, so validate it
-  # with the expression parser rather than accepting any trimmed string —
-  # otherwise `{% capture foo.bar %}` would store a value under a key no
-  # output path can resolve.
   defp parse_capture(name, tokens, pos, in_loop?) do
     case Expression.parse(name) do
       {:ok, {:variable, [name]}} ->
@@ -422,7 +418,7 @@ defmodule Alembic.Parser do
   defp parse_case_else(_whens, tokens, in_loop?), do: parse_optional_else(tokens, in_loop?)
 
   defp parse_when_values(raw) do
-    case Expression.parse_list(raw) do
+    case Expression.parse_keyword_list(raw) do
       {:ok, values} -> {:ok, values}
       {:error, reason} -> {:error, {:malformed_when, {String.trim(raw), reason}}}
     end

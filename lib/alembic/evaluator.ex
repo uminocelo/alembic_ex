@@ -32,11 +32,13 @@ defmodule Alembic.Evaluator do
   alias Alembic.{AST, Context, Filters, Lexer, Parser}
 
   @type reason ::
-          {:undefined_variable, [String.t()]}
+          {:undefined_variable, [String.t() | integer()]}
+          | {:invalid_dynamic_segment, term()}
           | {:include_not_found, String.t(), term()}
           | :include_loader_not_configured
           | {:include_compile_error, term()}
           | {:range_non_integer, term(), term()}
+          | {:keyword_requires_equality, AST.compare_op(), AST.keyword_literal()}
           | Filters.reason()
 
   @doc """
@@ -302,11 +304,37 @@ defmodule Alembic.Evaluator do
   # `Alembic.Context.strict/2`, driven by `Alembic.render/3`'s `strict:
   # true` option — turns that into a hard error instead, at the exact point
   # a path fails to resolve, whether inside an output tag or an expression.
+  #
+  # `path` may contain `{:dynamic, expr}` segments; each is evaluated against
+  # the current context first, yielding a string or integer lookup key. The
+  # strict-mode error reports the fully resolved path (ints preserved), not
+  # the unevaluated dynamic nodes.
   defp resolve_or_error(ctx, path) do
-    case Context.resolve_path(ctx, path) do
-      {:ok, value} -> {:ok, value}
-      :not_found when ctx.strict -> {:error, {:undefined_variable, path}}
-      :not_found -> {:ok, nil}
+    with {:ok, resolved} <- resolve_path_segments(path, ctx, []) do
+      case Context.resolve_path(ctx, resolved) do
+        {:ok, value} -> {:ok, value}
+        :not_found when ctx.strict -> {:error, {:undefined_variable, resolved}}
+        :not_found -> {:ok, nil}
+      end
+    end
+  end
+
+  defp resolve_path_segments([], _ctx, acc), do: {:ok, Enum.reverse(acc)}
+
+  defp resolve_path_segments([segment | rest], ctx, acc) do
+    case resolve_segment(segment, ctx) do
+      {:ok, value} -> resolve_path_segments(rest, ctx, [value | acc])
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp resolve_segment(segment, _ctx) when is_binary(segment), do: {:ok, segment}
+
+  defp resolve_segment({:dynamic, expr}, ctx) do
+    case eval_expr(expr, ctx) do
+      {:ok, value} when is_binary(value) or is_integer(value) -> {:ok, value}
+      {:ok, other} -> {:error, {:invalid_dynamic_segment, other}}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -315,6 +343,10 @@ defmodule Alembic.Evaluator do
   defp eval_expr({:variable, path}, ctx), do: resolve_or_error(ctx, path)
 
   defp eval_expr({:literal, value}, _ctx), do: {:ok, value}
+
+  # `empty`/`blank` never resolve to a context value; they travel through the
+  # expression evaluator as a tagged operand so compare/3 can interpret them.
+  defp eval_expr({:keyword, keyword}, _ctx), do: {:ok, {:keyword, keyword}}
 
   defp eval_expr({:filter_chain, base_expr, filters}, ctx) do
     with {:ok, base_value} <- eval_expr(base_expr, ctx),
@@ -326,7 +358,7 @@ defmodule Alembic.Evaluator do
   defp eval_expr({:compare, op, left_expr, right_expr}, ctx) do
     with {:ok, left} <- eval_expr(left_expr, ctx),
          {:ok, right} <- eval_expr(right_expr, ctx) do
-      {:ok, compare(op, left, right)}
+      eval_compare(op, left, right)
     end
   end
 
@@ -396,6 +428,10 @@ defmodule Alembic.Evaluator do
   defp truthy?(false), do: false
   defp truthy?(_other), do: true
 
+  defp compare(:eq, {:keyword, keyword}, right), do: keyword_match?(keyword, right)
+  defp compare(:eq, left, {:keyword, keyword}), do: keyword_match?(keyword, left)
+  defp compare(:neq, {:keyword, keyword}, right), do: not keyword_match?(keyword, right)
+  defp compare(:neq, left, {:keyword, keyword}), do: not keyword_match?(keyword, left)
   defp compare(:eq, left, right), do: left == right
   defp compare(:neq, left, right), do: left != right
   defp compare(:gt, left, right), do: left > right
@@ -403,6 +439,45 @@ defmodule Alembic.Evaluator do
   defp compare(:gte, left, right), do: left >= right
   defp compare(:lte, left, right), do: left <= right
   defp compare(:contains, left, right), do: contains?(left, right)
+
+  # `empty` and `blank` are equality-only operands; using them with an
+  # ordering or `contains` operator is a render error, not a silent false.
+  defp eval_compare(op, left, right) do
+    if keyword_operand?(left) or keyword_operand?(right) do
+      if op in [:eq, :neq] do
+        {:ok, compare(op, left, right)}
+      else
+        {:error, {:keyword_requires_equality, op, keyword_name(left) || keyword_name(right)}}
+      end
+    else
+      {:ok, compare(op, left, right)}
+    end
+  end
+
+  defp keyword_operand?({:keyword, _keyword}), do: true
+  defp keyword_operand?(_other), do: false
+
+  defp keyword_name({:keyword, keyword}), do: keyword
+  defp keyword_name(_other), do: nil
+
+  # `empty` matches "" , [] and %{} only — notably nil is *not* empty (Liquid
+  # parity). `blank` additionally matches nil, false, and whitespace-only
+  # strings.
+  defp keyword_match?(:empty, value), do: empty?(value)
+  defp keyword_match?(:blank, value), do: blank?(value)
+
+  defp empty?(""), do: true
+  defp empty?(value) when is_list(value), do: value == []
+  defp empty?(value) when is_map(value), do: map_size(value) == 0
+  defp empty?(_other), do: false
+
+  defp blank?(nil), do: true
+  defp blank?(false), do: true
+  defp blank?(""), do: true
+  defp blank?(value) when is_binary(value), do: String.trim(value) == ""
+  defp blank?(value) when is_list(value), do: value == []
+  defp blank?(value) when is_map(value), do: map_size(value) == 0
+  defp blank?(_other), do: false
 
   defp contains?(left, right) when is_binary(left) and is_binary(right) do
     String.contains?(left, right)

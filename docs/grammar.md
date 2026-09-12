@@ -149,7 +149,8 @@ filtered_primary = primary , { filter } ;
 primary          = variable | literal | range ;
 range            = "(" , expr , ".." , expr , ")" ;
 
-variable     = IDENT , { "." , ( IDENT | INTEGER ) | "[" , ( STRING | INTEGER ) , "]" } ;
+variable     = IDENT , { "." , ( IDENT | INTEGER ) | "[" , bracket_key , "]" } ;
+bracket_key  = STRING | INTEGER | expr ;
 literal      = STRING | INTEGER | FLOAT | "true" | "false" | "nil" | "null" ;
 
 filter       = "|" , IDENT , [ ":" , expr , { "," , expr } ] ;
@@ -162,14 +163,41 @@ INTEGER      = [ "-" ] , digit , { digit } ;
 FLOAT        = INTEGER , "." , digit , { digit } ;
 ```
 
+### Contextual keywords `empty` / `blank`
+
+`empty` and `blank` are **contextual** keywords, not reserved words. A bare
+`empty`/`blank` appearing as a comparison operand (with any comparison
+operator) is interpreted as the keyword. Everywhere else (as an output base,
+an `assign` RHS, or an argument) the bareword remains an ordinary variable
+path. They are equality-only operands:
+`x > empty` parses but fails to render with
+`{:error, {:keyword_requires_equality, op, keyword}}`.
+
+- `empty` matches `""`, `[]`, and `%{}` and nothing else. `nil` is **not**
+  empty (Liquid parity).
+- `blank` matches `nil`, `false`, `""`, whitespace-only strings, `[]`, and
+  `%{}`.
+
+### Dynamic bracket access
+
+A bracket key that is not a string or integer literal is a **dynamic
+segment** (`user[key]`, `items[i]`, `a[b.c]`, `a[forloop.index0]`). Its
+expression is parsed into `{:dynamic, expr()}` and evaluated against the
+current context at render time; the resulting string or integer is used as
+the lookup key. A segment evaluating to anything else (e.g. a boolean or
+`nil`) is a render error `{:invalid_dynamic_segment, value}`. String and
+integer literal keys stay static, so `user["name"]` and `user.name` remain
+identical.
+
 ### AST mapping
 
 Each production maps onto exactly one `Alembic.AST.expr()` shape:
 
 | Production | AST node |
 |---|---|
-| `variable` | `{:variable, path}` — `path :: [String.t()]` |
+| `variable` | `{:variable, path}` — `path :: [String.t() \| {:dynamic, expr()}]` |
 | `literal` | `{:literal, value}` |
+| `empty` / `blank` operand | `{:keyword, :empty \| :blank}` |
 | `filtered_primary` (≥ 1 filter) | `{:filter_chain, base_expr, [filter, ...]}` |
 | `comparison` (with `compare_op`) | `{:compare, op, left, right}` |
 | `and_expr` / `or_expr` | `{:logical, :and \| :or, left, right}` |

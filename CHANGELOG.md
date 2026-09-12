@@ -3,6 +3,14 @@
 All notable changes to this project are documented in this file, following
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- Added Liquid-compatible contextual `empty`/`blank` comparisons, dynamic
+  bracket access (`items[key]`), and array `slice` support; documented the
+  array-vs-string out-of-range behavior for `slice`.
+
 ## [0.1.1] - 2026-09-06
 
 ### Changed

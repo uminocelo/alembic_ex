@@ -319,6 +319,24 @@ defmodule Alembic.FiltersTest do
       assert {:ok, "abc"} = Filters.apply("join", ["a", "b", "c"], [])
     end
 
+    test "slice a list with offset only returns a single-element list" do
+      assert {:ok, ["b"]} = Filters.apply("slice", ["a", "b", "c"], [1])
+    end
+
+    test "slice a list with offset and length" do
+      assert {:ok, ["b", "c"]} = Filters.apply("slice", ["a", "b", "c", "d"], [1, 2])
+    end
+
+    test "slice a list with a negative start counts from the end" do
+      assert {:ok, ["c"]} = Filters.apply("slice", ["a", "b", "c"], [-1])
+      assert {:ok, ["b", "c"]} = Filters.apply("slice", ["a", "b", "c"], [-2, 2])
+    end
+
+    test "slice a list with an out-of-range start returns an empty list" do
+      assert {:ok, []} = Filters.apply("slice", ["a", "b", "c"], [10])
+      assert {:ok, []} = Filters.apply("slice", ["a", "b", "c"], [-10])
+    end
+
     test "first" do
       assert {:ok, "a"} = Filters.apply("first", ["a", "b"], [])
     end

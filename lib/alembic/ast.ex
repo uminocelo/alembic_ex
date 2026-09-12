@@ -60,7 +60,9 @@ defmodule Alembic.AST do
   | Node | Shape | Example |
   |---|---|---|
   | `{:variable, path}` | variable path | `user.name` → `{:variable, ["user", "name"]}` |
+  | `{:dynamic, expr}` (path segment) | render-time lookup key | `items[i]` → `{:variable, ["items", {:dynamic, {:variable, ["i"]}}]}` |
   | `{:literal, value}` | literal | `42` → `{:literal, 42}` |
+  | `{:keyword, keyword}` | `empty`/`blank` operand | `x == empty` |
   | `{:filter_chain, base, filters}` | filtered expression | `x \\| upcase` |
   | `{:compare, op, left, right}` | comparison | `x > 0` |
   | `{:logical, op, left, right}` | `and`/`or` | `a and b` |
@@ -74,13 +76,16 @@ defmodule Alembic.AST do
   module's shape since Milestone 1.1, before the parser existed).
   """
 
-  @type path :: [String.t()]
+  @type path_segment :: String.t() | {:dynamic, expr()}
+  @type path :: [path_segment()]
   @type literal :: String.t() | number() | boolean() | nil
+  @type keyword_literal :: :empty | :blank
   @type compare_op :: :eq | :neq | :gt | :lt | :gte | :lte | :contains
   @type logical_op :: :and | :or
   @type expr ::
           {:variable, path()}
           | {:literal, literal()}
+          | {:keyword, keyword_literal()}
           | {:filter_chain, expr(), [filter()]}
           | {:compare, compare_op(), expr(), expr()}
           | {:logical, logical_op(), expr(), expr()}

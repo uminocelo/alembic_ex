@@ -15,6 +15,14 @@ defmodule Alembic.Parser.Expression do
       primary          = variable | literal ;
       filter           = "|" , IDENT , [ ":" , expr , { "," , expr } ] ;
 
+  The barewords `empty` and `blank` are *contextual* keywords: a bare
+  `empty`/`blank` used as a comparison operand (for any comparison operator)
+  parses to `{:keyword, :empty}` / `{:keyword, :blank}`. They are still
+  equality-only at render time (`==`/`!=`); other operators return
+  `{:keyword_requires_equality, ...}`. Outside comparison operands, bare
+  `empty`/`blank` stay ordinary variable paths, so `{{ empty }}` and
+  `{% assign empty = 1 %}` still resolve a variable named `empty`.
+
   Filters bind tighter than comparison and logical operators — this lets a
   bare `"name | upcase"` parse on its own (used for output tags) while still
   allowing filtered operands inside a condition, e.g. `x | size > 0`.
@@ -105,6 +113,18 @@ defmodule Alembic.Parser.Expression do
     end
   end
 
+  @doc """
+  Like `parse_list/1`, but bare `empty`/`blank` values become keyword
+  operands. Used for `{% when %}` values, which are compared against the
+  case subject with `==` semantics and therefore accept the keywords.
+  """
+  @spec parse_keyword_list(String.t()) :: {:ok, [AST.expr()]} | {:error, reason()}
+  def parse_keyword_list(source) when is_binary(source) do
+    with {:ok, exprs} <- parse_list(source) do
+      {:ok, Enum.map(exprs, &as_keyword/1)}
+    end
+  end
+
   defp parse_list_tokens([], acc), do: {:ok, Enum.reverse(acc)}
   defp parse_list_tokens([:comma | _rest], _acc), do: {:error, {:unexpected_token, :comma}}
 
@@ -163,6 +183,7 @@ defmodule Alembic.Parser.Expression do
   defp parse_not(tokens, allow_filters, allow_ranges),
     do: parse_comparison(tokens, allow_filters, allow_ranges)
 
+  @keyword_literals %{"empty" => :empty, "blank" => :blank}
   @compare_ops [:eq, :neq, :gt, :lt, :gte, :lte, :contains]
 
   defp parse_comparison(tokens, allow_filters, allow_ranges) do
@@ -174,11 +195,23 @@ defmodule Alembic.Parser.Expression do
   defp parse_comparison_rhs(left, [{:op, op} | rest], allow_filters, allow_ranges)
        when op in @compare_ops do
     with {:ok, right, rest2} <- parse_operand(rest, allow_filters, allow_ranges) do
-      {:ok, {:compare, op, left, right}, rest2}
+      {:ok, {:compare, op, as_keyword(left), as_keyword(right)}, rest2}
     end
   end
 
   defp parse_comparison_rhs(left, rest, _allow_filters, _allow_ranges), do: {:ok, left, rest}
+
+  # A bare `empty`/`blank` variable path in an operand position is the
+  # contextual keyword, not a variable lookup. Any other shape (a longer
+  # path, a filter chain, a literal) is left untouched.
+  defp as_keyword({:variable, [name]}) do
+    case Map.fetch(@keyword_literals, name) do
+      {:ok, keyword} -> {:keyword, keyword}
+      :error -> {:variable, [name]}
+    end
+  end
+
+  defp as_keyword(other), do: other
 
   defp parse_operand(tokens, true, allow_ranges), do: parse_filtered_primary(tokens, allow_ranges)
   defp parse_operand(tokens, false, allow_ranges), do: parse_primary(tokens, allow_ranges)
@@ -268,8 +301,25 @@ defmodule Alembic.Parser.Expression do
     parse_variable_path([Integer.to_string(index) | segments], rest, allow_ranges)
   end
 
-  defp parse_variable_path(_segments, [:lbracket | _rest], _allow_ranges) do
-    {:error, {:unexpected_token, :expected_bracket_key}}
+  # Any other bracketed expression is a dynamic segment: its expression is
+  # evaluated against the current context at render time and the resulting
+  # string/integer is used as the lookup key (`items[i]`, `a[b.c]`). String
+  # and integer literals are handled by the static clauses above so that
+  # `user["name"]` and `user.name` remain identical.
+  defp parse_variable_path(segments, [:lbracket | rest], allow_ranges) do
+    case parse_or(rest, true, false) do
+      {:ok, expr, [:rbracket | rest2]} ->
+        parse_variable_path([{:dynamic, expr} | segments], rest2, allow_ranges)
+
+      {:ok, _expr, [token | _rest]} ->
+        {:error, {:unexpected_token, token}}
+
+      {:ok, _expr, []} ->
+        {:error, {:unexpected_token, :eof}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   defp parse_variable_path(segments, rest, _allow_ranges) do

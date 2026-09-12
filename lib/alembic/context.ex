@@ -158,7 +158,7 @@ defmodule Alembic.Context do
       iex> Alembic.Context.resolve_path(ctx, ["posts", "1"])
       {:ok, "b"}
   """
-  @spec resolve_path(t(), [String.t()]) :: {:ok, any()} | :not_found
+  @spec resolve_path(t(), [String.t() | integer()]) :: {:ok, any()} | :not_found
   def resolve_path(%__MODULE__{} = ctx, [head | rest]) do
     case lookup(ctx, head) do
       {:ok, value} -> traverse(value, rest)
@@ -245,6 +245,14 @@ defmodule Alembic.Context do
     end
   end
 
+  defp fetch_list_index(list, key) when is_integer(key) do
+    if key >= 0 and key < length(list) do
+      {:ok, Enum.at(list, key)}
+    else
+      :not_found
+    end
+  end
+
   defp fetch_list_index(list, key) do
     with {index, ""} <- Integer.parse(key),
          true <- index >= 0 and index < length(list) do
@@ -271,9 +279,11 @@ defmodule Alembic.Context do
     end
   end
 
-  defp safe_to_existing_atom(key) do
+  defp safe_to_existing_atom(key) when is_binary(key) do
     {:ok, String.to_existing_atom(key)}
   rescue
     ArgumentError -> :error
   end
+
+  defp safe_to_existing_atom(_key), do: :error
 end

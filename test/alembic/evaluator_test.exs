@@ -11,6 +11,16 @@ defmodule Alembic.EvaluatorTest do
     Evaluator.eval(ast, Context.new(bindings))
   end
 
+  defp condition(cond_source, bindings) do
+    render("{% if " <> cond_source <> " %}yes{% else %}no{% endif %}", bindings)
+  end
+
+  defp render_strict(source, bindings) do
+    {:ok, tokens} = Lexer.tokenize(source)
+    {:ok, ast} = Parser.parse(tokens)
+    Evaluator.eval(ast, Context.new(bindings) |> Context.strict(true))
+  end
+
   describe "text node" do
     test "passthrough" do
       assert {:ok, "hello"} = render("hello")
@@ -36,6 +46,62 @@ defmodule Alembic.EvaluatorTest do
 
     test "an unknown filter propagates as an error" do
       assert {:error, {:unknown_filter, "nope"}} = render("{{ name | nope }}", %{"name" => "x"})
+    end
+  end
+
+  describe "dynamic bracket access" do
+    test "map key via a variable" do
+      assert {:ok, "Lisbon"} =
+               render("{{ user[key] }}", %{"user" => %{"city" => "Lisbon"}, "key" => "city"})
+    end
+
+    test "list index via an integer variable" do
+      assert {:ok, "b"} = render("{{ items[i] }}", %{"items" => ["a", "b", "c"], "i" => 1})
+    end
+
+    test "map key via an integer variable preserves integer-keyed lookups" do
+      assert {:ok, "one"} = render("{{ data[key] }}", %{"data" => %{1 => "one"}, "key" => 1})
+    end
+
+    test "list index via forloop.index0" do
+      template = "{% for x in items %}{{ items[forloop.index0] }}{% endfor %}"
+      assert {:ok, "abc"} = render(template, %{"items" => ["a", "b", "c"]})
+    end
+
+    test "nested dynamic segment" do
+      assert {:ok, "Lisbon"} =
+               render("{{ data[which.key] }}", %{
+                 "data" => %{"city" => "Lisbon"},
+                 "which" => %{"key" => "city"}
+               })
+    end
+
+    test "dynamic segment combined with a static trailing segment" do
+      assert {:ok, "Lisbon"} =
+               render("{{ users[i].city }}", %{
+                 "users" => [%{"city" => "Lisbon"}],
+                 "i" => 0
+               })
+    end
+
+    test "a boolean dynamic segment is a render error" do
+      assert {:error, {:invalid_dynamic_segment, true}} =
+               render("{{ items[flag] }}", %{"items" => ["a"], "flag" => true})
+    end
+
+    test "a nil dynamic segment is a render error" do
+      assert {:error, {:invalid_dynamic_segment, nil}} =
+               render("{{ items[missing] }}", %{"items" => ["a"]})
+    end
+
+    test "strict mode reports the fully resolved dynamic path" do
+      assert {:error, {:undefined_variable, ["user", "nope"]}} =
+               render_strict("{{ user[key] }}", %{"user" => %{}, "key" => "nope"})
+    end
+
+    test "strict mode reports a resolved integer segment as an integer" do
+      assert {:error, {:undefined_variable, ["items", 5]}} =
+               render_strict("{{ items[i] }}", %{"items" => [], "i" => 5})
     end
   end
 
@@ -373,6 +439,80 @@ defmodule Alembic.EvaluatorTest do
     test "contains operator" do
       assert {:ok, "yes"} =
                render(~s({% if s contains "ell" %}yes{% else %}no{% endif %}), %{"s" => "hello"})
+    end
+  end
+
+  describe "empty and blank keywords" do
+    test "`empty` truth table" do
+      assert {:ok, "yes"} = condition("x == empty", %{"x" => ""})
+      assert {:ok, "yes"} = condition("x == empty", %{"x" => []})
+      assert {:ok, "yes"} = condition("x == empty", %{"x" => %{}})
+
+      assert {:ok, "no"} = condition("x == empty", %{"x" => nil})
+      assert {:ok, "no"} = condition("x == empty", %{"x" => false})
+      assert {:ok, "no"} = condition("x == empty", %{"x" => " "})
+      assert {:ok, "no"} = condition("x == empty", %{"x" => 0})
+      assert {:ok, "no"} = condition("x == empty", %{"x" => "x"})
+      assert {:ok, "no"} = condition("x == empty", %{"x" => [1]})
+    end
+
+    test "`blank` truth table" do
+      assert {:ok, "yes"} = condition("x == blank", %{"x" => nil})
+      assert {:ok, "yes"} = condition("x == blank", %{"x" => false})
+      assert {:ok, "yes"} = condition("x == blank", %{"x" => ""})
+      assert {:ok, "yes"} = condition("x == blank", %{"x" => "   "})
+      assert {:ok, "yes"} = condition("x == blank", %{"x" => []})
+      assert {:ok, "yes"} = condition("x == blank", %{"x" => %{}})
+
+      assert {:ok, "no"} = condition("x == blank", %{"x" => 0})
+      assert {:ok, "no"} = condition("x == blank", %{"x" => "x"})
+      assert {:ok, "no"} = condition("x == blank", %{"x" => [1]})
+    end
+
+    test "`!=` negates the keyword match" do
+      assert {:ok, "yes"} = condition("x != empty", %{"x" => nil})
+      assert {:ok, "no"} = condition("x != empty", %{"x" => ""})
+      assert {:ok, "yes"} = condition("x != blank", %{"x" => "x"})
+      assert {:ok, "no"} = condition("x != blank", %{"x" => nil})
+    end
+
+    test "reversed operand order is symmetric" do
+      assert {:ok, "yes"} = condition("empty == x", %{"x" => ""})
+      assert {:ok, "no"} = condition("empty == x", %{"x" => nil})
+      assert {:ok, "yes"} = condition("blank == x", %{"x" => nil})
+      assert {:ok, "no"} = condition("blank != x", %{"x" => nil})
+    end
+
+    test "keywords work with logical operators" do
+      assert {:ok, "yes"} =
+               condition("x == empty and y == blank", %{"x" => "", "y" => nil})
+    end
+
+    test "a keyword with an ordering operator is a render error" do
+      assert {:error, {:keyword_requires_equality, :gt, :empty}} =
+               condition("x > empty", %{"x" => ""})
+
+      assert {:error, {:keyword_requires_equality, :lt, :blank}} =
+               condition("x < blank", %{"x" => ""})
+    end
+
+    test "a keyword with contains is a render error" do
+      assert {:error, {:keyword_requires_equality, :contains, :empty}} =
+               render(~s({% if x contains empty %}yes{% endif %}), %{"x" => "hi"})
+    end
+
+    test "a variable named empty still resolves as a variable" do
+      assert {:ok, "hi"} = render("{{ empty }}", %{"empty" => "hi"})
+
+      assert {:ok, "hi"} =
+               render("{% assign empty = 'hi' %}{{ empty }}", %{})
+    end
+
+    test "`{% when empty %}` matches empty subjects" do
+      template = "{% case x %}{% when empty %}empty{% else %}other{% endcase %}"
+      assert {:ok, "empty"} = render(template, %{"x" => ""})
+      assert {:ok, "other"} = render(template, %{"x" => "full"})
+      assert {:ok, "other"} = render(template, %{"x" => nil})
     end
   end
 

@@ -19,6 +19,9 @@ hand-written in `test/integration/liquid_compat_test.exs`.
   variable access, both interchangeable.
 - **Filters** — full pipe chain syntax (`{{ x | a | b: 1, 2 }}`); see
   `Alembic.Filters` for the complete catalog (string, array, number, misc).
+  `slice` slices both strings and arrays (positive/negative start, optional
+  length). For arrays, an out-of-range start returns `[]`; for strings it
+  returns `""` (via `String.slice/3`).
 - **Control flow** — `{% if %}` / `{% elsif %}` / `{% else %}` /
   `{% endif %}`, `{% for %}` / `{% else %}` / `{% endfor %}` with full
   `forloop` metadata (`index`, `index0`, `rindex`, `rindex0`, `first`,
@@ -41,6 +44,11 @@ hand-written in `test/integration/liquid_compat_test.exs`.
   `{% else %}`, matching Liquid rather than Elixir's descending ranges.
 - **Operators** — `==`, `!=`, `>`, `<`, `>=`, `<=`, `contains`, `and`, `or`,
   `not`, with `not > and > or` precedence (see `docs/grammar.md` §5.4).
+- **`empty` / `blank` keywords** — `x == empty`, `x != blank` (and reversed
+  operand order), including `{% when empty %}`. `empty` matches `""`, `[]`,
+  and `%{}` (`nil` is not empty); `blank` also matches `nil`, `false`, and
+  whitespace-only strings. Equality-only: other operators raise
+  `{:keyword_requires_equality, _, _}`.
 - **Assignment** — `{% assign var = expr %}`, visible to every node
   evaluated after it, including across `{% for %}`/`{% if %}` boundaries.
 - **Whitespace control** — `{{-`, `-}}`, `{%-`, `-%}` in any combination.
@@ -68,7 +76,6 @@ hand-written in `test/integration/liquid_compat_test.exs`.
 | `date` filter | Elixir `Calendar.strftime/2` format strings | Ruby `strftime` format strings | No Ruby-compatible formatter available without a dependency; the two format-string dialects are similar but not identical |
 | Output tag base expression | must be a bare variable path (optionally filtered) | any expression, including literals | `Alembic.AST.output_node`'s type (`{:output, path(), [filter()]}`) was fixed in Milestone 1.1, before the parser existed; `{{ "literal" \| filter }}` returns `{:error, {:unsupported_output_expression, _}}` |
 | Cache hit/miss telemetry | `Logger.debug/1` | n/a | `:telemetry` is a separate Hex package; issue 1.1.1's zero-runtime-deps policy (ex_doc only) rules it out |
-| `slice` filter | strings only | strings and arrays | `Alembic.Filters`' `slice` clauses always run the input through `coerce_to_string/1`; array slicing was never implemented |
 
 ## Unsupported features (out of MVP scope)
 
